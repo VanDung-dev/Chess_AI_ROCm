@@ -2,7 +2,6 @@ import torch
 import torch_directml
 import numpy as np
 import copy
-from chess_engine import Move
 
 device = torch_directml.device(0)
 
@@ -22,22 +21,34 @@ class MCTSNode:
 
     def best_child(self, exploration_weight=1):
         weights = {
-            move_key: (child.total_value / (child.visit_count + 1e-6)) +
-            exploration_weight * child.prior * (self.visit_count ** 0.5 / (1 + child.visit_count))
+            move_key: (child.total_value / (child.visit_count + 1e-6))
+            + exploration_weight
+            * child.prior
+            * (self.visit_count**0.5 / (1 + child.visit_count))
             for move_key, child in self.children.items()
         }
         best_move_key = max(weights, key=weights.get)
         return self.children[best_move_key]
 
+
 def mcts_rollout(ai_model, root):
     node = root
-    while not node.state.checkmate and not node.state.stalemate and node.is_fully_expanded():
+    while (
+        not node.state.checkmate
+        and not node.state.stalemate
+        and node.is_fully_expanded()
+    ):
         node = node.best_child()
 
     if not node.state.checkmate and not node.state.stalemate:
         valid_moves = node.state.get_valid_moves()
         for move in valid_moves:
-            move_key = (move.start_row, move.start_column, move.end_row, move.end_column)
+            move_key = (
+                move.start_row,
+                move.start_column,
+                move.end_row,
+                move.end_column,
+            )
 
             # Tạo bản sao GameState để không ảnh hưởng trạng thái gốc
             new_state = copy.deepcopy(node.state)
@@ -45,36 +56,100 @@ def mcts_rollout(ai_model, root):
 
             # Tạo node con
             new_node = MCTSNode(new_state, parent=node, move_key=move_key)
-            policy, value = ai_model(encode_board(new_state).unsqueeze(0))
-            new_node.prior = policy[0][move_to_index(move)].item()
+            policy, value, threats, phase = ai_model(
+                encode_board(new_state).unsqueeze(0)
+            )
+            new_node.prior = adjust_priority_based_on_phase(
+                policy[0][move_to_index(move)].item(), phase
+            )
+
+            # Lưu mối đe dọa cho bước này
+            new_node.threat_score = calculate_threat_score(new_state, threats)
             node.children[move_key] = new_node
 
     # Lấy giá trị trạng thái và truyền ngược lại
-    _, value = ai_model(encode_board(node.state).unsqueeze(0))
+    _, value, _, _ = ai_model(encode_board(node.state).unsqueeze(0))
     backpropagate(node, value.item())
 
-def move_to_index(move):
-    """Chuyển nước đi thành chỉ số duy nhất."""
-    if not isinstance(move, Move):
-        raise ValueError("move phải là một đối tượng Move.")
-    start_idx = move.start_row * 8 + move.start_column
-    end_idx = move.end_row * 8 + move.end_column
-    return start_idx * 64 + end_idx
+
+def adjust_priority_based_on_phase(priority, phase):
+    """Điều chỉnh mức độ ưu tiên dựa trên giai đoạn của trận đấu."""
+    opening_weight, middlegame_weight, endgame_weight = phase.squeeze().tolist()
+
+    if opening_weight > 0.5:
+        return priority * 1.1  # Ưu tiên phát triển quân
+    elif middlegame_weight > 0.5:
+        return priority * 1.2  # Ưu tiên tấn công vua
+    elif endgame_weight > 0.5:
+        return priority * 1.3  # Ưu tiên chiếu hết/phong cấp
+    return priority
+
+
+def calculate_threat_score(state, threats):
+    """Dự đoán điểm đe dọa dựa trên output mạng."""
+    if threats.dim() == 4 and threats.shape[2:] == (8, 8):
+        threat_map = threats.squeeze(0).squeeze(0).detach().cpu().numpy()
+    else:
+        raise ValueError(
+            f"Unexpected threats shape: {threats.shape}, expected [batch_size, 1, 8, 8]"
+        )
+
+    king_position = (
+        state.white_king_location if state.white_to_move else state.black_king_location
+    )
+    return threat_map[king_position[0], king_position[1]]
+
 
 def encode_board(game_state):
     """Mã hóa bàn cờ và thông tin trạng thái thành tensor."""
     piece_map = {
-        "--": 0, "wK": 1, "wQ": 2, "wR": 3, "wB": 4, "wN": 5, "wP": 6,
-        "bK": 7, "bQ": 8, "bR": 9, "bB": 10, "bN": 11, "bP": 12,
+        "--": 0,
+        "wK": 1,
+        "wQ": 2,
+        "wR": 3,
+        "wB": 4,
+        "wN": 5,
+        "wP": 6,
+        "bK": 7,
+        "bQ": 8,
+        "bR": 9,
+        "bB": 10,
+        "bN": 11,
+        "bP": 12,
     }
     board = game_state.board
-    encoded_board = np.zeros((13, 8, 8), dtype=np.float32)  # [channels, height, width]
+    encoded_board = np.zeros(
+        (17, 8, 8), dtype=np.float32
+    )  # 17 channels (thêm trạng thái đặc biệt)
     for i, row in enumerate(board):
         for j, piece in enumerate(row):
-            encoded_board[piece_map[piece], i, j] = 1  # One-hot encoding cho mỗi quân cờ
+            encoded_board[piece_map[piece], i, j] = 1
+
+    # Thêm trạng thái đặc biệt
+    encoded_board[13, :, :] = game_state.white_castle_king_side
+    encoded_board[14, :, :] = game_state.white_castle_queen_side
+    encoded_board[15, :, :] = game_state.black_castle_king_side
+    encoded_board[16, :, :] = game_state.black_castle_queen_side
 
     # Chuyển đổi thành tensor PyTorch
     return torch.tensor(encoded_board, dtype=torch.float32, device=device)
+
+
+def move_to_index(move):
+    """Chuyển nước đi thành chỉ số duy nhất."""
+    start_idx = move.start_row * 8 + move.start_column
+    end_idx = move.end_row * 8 + move.end_column
+    return start_idx * 64 + end_idx
+
+
+def backpropagate(node, value):
+    """Truyền giá trị ngược lại từ nút hiện tại lên đến nút gốc."""
+    while node is not None:
+        node.total_value += value
+        node.visit_count += 1
+        value = -value
+        node = node.parent
+
 
 def simulate_move(game_state, move):
     """
@@ -82,7 +157,7 @@ def simulate_move(game_state, move):
     Trả về trạng thái mới sau nước đi và phần thưởng.
     """
     captured_piece = move.piece_captured
-    game_state.make_move(move)  # Thực hiện nước đi
+    game_state.make_move(move)
     reward = 0
     if game_state.checkmate:
         reward = 1 if game_state.white_to_move else -1
@@ -91,22 +166,24 @@ def simulate_move(game_state, move):
     elif captured_piece != "--":
         reward += piece_value(captured_piece)
 
-    game_state.undo_move()  # Hoàn tác nước đi sau khi tính toán
+    game_state.undo_move()
     return game_state, reward
+
 
 def piece_value(piece):
     """Giá trị quân cờ."""
-    values = {"wP": 1, "bP": -1, "wN": 3, "bN": -3, "wB": 3, "bB": -3,
-              "wR": 5, "bR": -5, "wQ": 9, "bQ": -9, "wK": 0, "bK": 0}
+    values = {
+        "wP": 1,
+        "bP": -1,
+        "wN": 3,
+        "bN": -3,
+        "wB": 3,
+        "bB": -3,
+        "wR": 5,
+        "bR": -5,
+        "wQ": 9,
+        "bQ": -9,
+        "wK": 0,
+        "bK": 0,
+    }
     return values.get(piece, 0)
-
-def backpropagate(node, value):
-    """Truyền giá trị ngược lại từ nút hiện tại lên đến nút gốc."""
-    while node is not None:
-        # Cập nhật tổng giá trị và số lần thăm
-        node.total_value += value
-        node.visit_count += 1
-
-        # Đảo giá trị nếu lượt là của đối thủ
-        value = -value
-        node = node.parent

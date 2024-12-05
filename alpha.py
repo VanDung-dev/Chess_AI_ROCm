@@ -1,37 +1,67 @@
-import time
 import h5py
+import numpy as np
+import torch
+import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from chess_neuron import *
-from chess_mcts import *
-from chess_engine import *
+import time
+from torch.utils.data import random_split
+from torch.utils.data import DataLoader, Dataset
+from chess_engine import GameState, Move
+from chess_mcts import MCTSNode, mcts_rollout, encode_board, move_to_index, device
+from chess_neuron import ChessNet
 
-model_path = "ai_model_alpha.pth"
-data_path = "ai_data_alpha.h5"
 
+class ChessDataset(Dataset):
+    def __init__(self, h5_file):
+        with h5py.File(h5_file, "r") as f:
+            self.boards = []
+            self.policies = []
+            self.values = []
+            self.phases = []
+            for game_group in f.values():
+                self.boards.extend(game_group["boards"][:])
+                self.policies.extend(game_group["policies"][:])
+                self.values.extend(game_group["values"][:])
+                self.phases.extend(game_group["phases"][:])
 
-def calculate_reward(move, game_state):
-    """Tính điểm thưởng dựa trên nước đi và trạng thái bàn cờ."""
-    reward = 0
-    reward += piece_value(move.piece_captured)
+    def __len__(self):
+        return len(self.boards)
 
-    if move.is_castle_move:
-        reward += 2 if game_state.white_to_move else -2
-    if move.is_check:
-        reward += 2 if game_state.white_to_move else -2
-    if move.is_pawn_promotion:
-        promoted_piece_value = piece_value(
-            game_state.board[move.end_row][move.end_column]
+    def __getitem__(self, idx):
+        board = self.boards[idx]
+        policy = self.policies[idx]
+        value = self.values[idx]
+        phase = self.phases[idx]
+        return (
+            torch.tensor(board, dtype=torch.float32),
+            torch.tensor(policy, dtype=torch.float32),
+            torch.tensor(value, dtype=torch.float32),
+            torch.tensor(phase, dtype=torch.long),
         )
-        reward += (
-            promoted_piece_value if game_state.white_to_move else -promoted_piece_value
-        )
 
-    return reward
+
+def append_to_h5(output_file, data):
+    """Ghi thêm dữ liệu mới vào file .h5"""
+    with h5py.File(output_file, "a") as f:
+        if f"game_{data['game_number']}" in f:
+            print(f"Game {data['game_number']} đã tồn tại. Bỏ qua.")
+            return
+        game_group = f.create_group(f"game_{data['game_number']}")
+        game_group.create_dataset(
+            "boards", data=np.array(data["boards"], dtype=np.float32)
+        )
+        game_group.create_dataset(
+            "policies", data=np.array(data["policies"], dtype=np.float32)
+        )
+        game_group.create_dataset(
+            "values", data=np.array(data["values"], dtype=np.float32)
+        )
+        game_group.create_dataset(
+            "phases", data=np.array(data["phases"], dtype=np.int32)
+        )
 
 
 def select_move(ai_model, game_state, mcts_iterations=10, epsilon=0.1):
-    """Chọn nước đi tốt nhất hoặc ngẫu nhiên với xác suất epsilon."""
     if np.random.rand() < epsilon:
         valid_moves = game_state.get_valid_moves()
         return np.random.choice(valid_moves)
@@ -39,154 +69,252 @@ def select_move(ai_model, game_state, mcts_iterations=10, epsilon=0.1):
     root = MCTSNode(game_state)
     for _ in range(mcts_iterations):
         mcts_rollout(ai_model, root)
+
     best_child = root.best_child(exploration_weight=0)
     for move in game_state.get_valid_moves():
-        if (move.start_row,move.start_column,move.end_row,move.end_column,) == best_child.move_key:
+        if (
+            move.start_row,
+            move.start_column,
+            move.end_row,
+            move.end_column,
+        ) == best_child.move_key:
             return move
 
-
-def self_play(ai_model, num_games=100, save_path=data_path):
-    """AI tự chơi và lưu dữ liệu với trạng thái trước cả nước đi của trắng và đen."""
-    with h5py.File(save_path, "w") as h5file:
-        for game_num in range(num_games):
-            print(f"Đang chơi ván thứ {game_num + 1}/{num_games}...")
-            game_state = GameState()
-            states, policies, rewards, actions = [], [], [], []
-            cumulative_reward = 0
-            num = 1
-
-            while (
-                not game_state.checkmate
-                and not game_state.stalemate
-                and not game_state.stalemate_special()
-            ):
-                valid_moves = game_state.get_valid_moves()
-                if not valid_moves:
-                    break
-
-                state = encode_board(game_state)
-                move = select_move(ai_model, game_state)
-                if move not in valid_moves:
-                    raise ValueError("Nước đi của AI không hợp lệ!")
-                print(f"{num}: {move.get_chess_notation()}")
-                num += 1
-
-                game_state.make_move(move)
-                reward = calculate_reward(move, game_state)
-                cumulative_reward += reward
-
-                states.append(state.tolist())
-                policies.append(np.zeros(4672, dtype=np.float32))
-                rewards.append(cumulative_reward)
-                actions.append(move.get_chess_notation())
-
-                if (
-                    game_state.checkmate
-                    or game_state.stalemate
-                    or game_state.stalemate_special()
-                ):
-                    break
-
-            if game_state.checkmate:
-                actions.append("#")
-            elif game_state.stalemate or game_state.stalemate_special():
-                actions.append("1/2 - 1/2")
-
-            group = h5file.create_group(f"game_{game_num}")
-            group.create_dataset("states", data=np.array(states, dtype=np.float32))
-            group.create_dataset("policies", data=np.array(policies, dtype=np.float32))
-            group.create_dataset("rewards", data=np.array(rewards, dtype=np.float32))
-            group.create_dataset("actions", data=np.array(actions, dtype="S"))
-
-            print(f"Đã lưu dữ liệu ván {game_num + 1}.")
+    valid_moves = game_state.get_valid_moves()
+    return valid_moves[0] if valid_moves else None
 
 
-def train_with(ai_model, optimizer, h5_file=data_path, epochs=10, batch_size=2048):
-    """Huấn luyện mô hình bằng dữ liệu trong file HDF5."""
-    ai_model.train()
-    states, policies, values = [], [], []
-    with h5py.File(h5_file, "r") as h5file:
-        for game_key in h5file.keys():
-            print(f"Đang lấy mẫu từ ván {game_key}")
-            game_states = torch.tensor(
-                h5file[game_key]["states"][:], dtype=torch.float32
-            ).to(device)
-            game_policies = torch.tensor(
-                h5file[game_key]["policies"][:], dtype=torch.float32
-            ).to(device)
-            game_values = torch.tensor(
-                h5file[game_key]["rewards"][:], dtype=torch.float32
-            ).to(device)
-            states.extend(game_states)
-            policies.extend(game_policies)
-            values.extend(game_values)
+def self_play(ai_model, num_games, output_file, mcts_iterations=10):
+    all_game_values = []  # Danh sách lưu kết quả từng ván đấu
 
-    dataset = TensorDataset(
-        torch.stack(states), torch.stack(policies), torch.tensor(values, device=device)
-    )
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    for game_idx in range(num_games):
+        print(f"Game {game_idx + 1}/{num_games}")
+        game_state = GameState()
+        game_boards = []
+        game_policies = []
+        game_values = []
+        phase_labels = []  # Lưu nhãn giai đoạn trận đấu
+        start_time = time.time()
+        # num = 1
 
-    print(f"Đang học")
-    for epoch in range(epochs):
-        total_loss, total_policy_loss, total_value_loss = 0, 0, 0
-        for batch_states, batch_policies, batch_values in data_loader:
-            batch_states, batch_policies, batch_values = (
-                batch_states.to(device),
-                batch_policies.to(device),
-                batch_values.to(device),
-            )
-            optimizer.zero_grad()
-            predicted_policies, predicted_values = ai_model(batch_states)
-            policy_loss = torch.nn.functional.cross_entropy(
-                predicted_policies, batch_policies
-            )
-            value_loss = torch.nn.functional.mse_loss(
-                predicted_values.squeeze(-1), batch_values
-            )
-            loss = policy_loss + value_loss
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            total_policy_loss += policy_loss.item()
-            total_value_loss += value_loss.item()
-        epoch_log = (
-            f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss / len(data_loader):.4f}, "
-            f"Policy Loss: {total_policy_loss / len(data_loader):.4f}, "
-            f"Value Loss: {total_value_loss / len(data_loader):.4f}\n"
+        while (
+            not game_state.checkmate
+            and not game_state.stalemate
+            and not game_state.stalemate_special()
+        ):
+            valid_moves = game_state.get_valid_moves()
+            if not valid_moves:
+                break
+
+            # Chọn nước đi sử dụng select_move
+            move = select_move(ai_model, game_state, mcts_iterations=mcts_iterations)
+
+            # Lưu trạng thái hiện tại
+            root = MCTSNode(game_state)
+            for _ in range(mcts_iterations):
+                mcts_rollout(ai_model, root)
+
+            policy = np.zeros(4672)
+            for move_key, child in root.children.items():
+                start_square = (move_key[0], move_key[1])
+                end_square = (move_key[2], move_key[3])
+                idx = move_to_index(Move(start_square, end_square, game_state.board))
+                policy[idx] = child.visit_count
+            policy /= policy.sum()
+
+            # Lấy phase từ mô hình AI
+            _, _, _, phase = ai_model(encode_board(game_state).unsqueeze(0))
+            phase_np = phase.detach().cpu().numpy().squeeze()
+
+            # Mã hóa giai đoạn trận đấu
+            if phase_np[0] > phase_np[1] and phase_np[0] > phase_np[2]:
+                phase_label = 0  # Opening
+            elif phase_np[1] > phase_np[0] and phase_np[1] > phase_np[2]:
+                phase_label = 1  # Middlegame
+            else:
+                phase_label = 2  # Endgame
+            phase_labels.append(phase_label)
+
+            game_boards.append(encode_board(game_state).cpu().numpy())
+            game_policies.append(policy)
+            game_values.append(1 if game_state.white_to_move else -1)
+
+            # Thực hiện nước đi
+            game_state.make_move(move)
+            # print(f"{num}: {move}")
+            # num += 1
+
+        # Xác định giá trị kết thúc
+        final_value = 1 if game_state.checkmate else 0
+        game_values = [final_value * value for value in game_values]
+        all_game_values.append(final_value)  # Lưu kết quả của ván đấu
+
+        # Save each game's data to the H5 file immediately after the game
+        append_to_h5(
+            output_file,
+            {
+                "game_number": game_idx,
+                "boards": np.array(game_boards),
+                "policies": np.array(game_policies),
+                "values": np.array(game_values),
+                "phases": np.array(phase_labels),  # Lưu phase labels
+            },
         )
-        with open(f"training_log.txt", "a") as log_file:
-            log_file.write(epoch_log)
-        print(epoch_log)
+        end_time = time.time()
+        print(
+            f"Thời gian ván {game_idx + 1}: {time.strftime('%H:%M:%S', time.gmtime(end_time - start_time))}"
+        )
+
+    # Tóm tắt kết quả sau tất cả các ván đấu
+    self_play_summary(all_game_values)
 
 
-def save_model(ai_model, path=model_path):
-    torch.save(ai_model.state_dict(), path)
-    print(f"Đã lưu mô hình tại {path}.")
+def self_play_summary(all_values):
+    """Tóm tắt kết quả self-play."""
+    wins = sum(1 for v in all_values if v > 0)
+    losses = sum(1 for v in all_values if v < 0)
+    draws = sum(1 for v in all_values if v == 0)
+    print(f"Summary: {wins} Wins, {losses} Losses, {draws} Draws")
 
 
-def load_model(ai_model, path=model_path):
-    try:
-        ai_model.load_state_dict(torch.load(path, map_location=device))
-        print(f"Đã tải mô hình từ {path}.")
-    except FileNotFoundError:
-        print(f"Lỗi: Không tìm thấy {path}.")
+def train(
+    model, train_dataset, val_dataset, epochs=100, batch_size=256, lr=1e-5, patience=5
+):
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    policy_loss_fn = nn.CrossEntropyLoss()
+    value_loss_fn = nn.MSELoss()
+    phase_loss_fn = nn.CrossEntropyLoss()
+    accumulation_steps = 4
+
+    model.train()
+    best_loss = float("inf")
+    epochs_no_improve = 0
+
+    for epoch in range(epochs):
+        total_train_loss = 0
+        total_val_loss = 0
+
+        # Training phase
+        for i, (boards, policies, values, phases) in enumerate(train_dataloader):
+            boards = boards.to(device)
+            policies = policies.to(device)
+            values = values.to(device)
+            phases = phases.to(device)  # Chuyển phases sang GPU
+
+            try:
+                pred_policies, pred_values, _, pred_phases = model(boards)
+
+                # Kiểm tra NaN trong đầu ra mô hình
+                if (
+                    torch.isnan(pred_policies).any()
+                    or torch.isnan(pred_values).any()
+                    or torch.isnan(pred_phases).any()
+                ):
+                    print(f"NaN detected in predictions at batch {i}")
+                    continue
+
+                loss_policy = policy_loss_fn(
+                    pred_policies, torch.argmax(policies, dim=1)
+                )
+                loss_value = value_loss_fn(pred_values.squeeze(), values)
+                loss_phase = phase_loss_fn(pred_phases, phases)
+
+                loss = (loss_policy + loss_value + loss_phase) / accumulation_steps
+                loss.backward()
+
+                # Gradient Clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
+                if (i + 1) % accumulation_steps == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                total_train_loss += loss.item()
+            except Exception as e:
+                print(f"Error during training batch {i}: {e}")
+
+        # Validation phase
+        model.eval()
+        with torch.no_grad():
+            for boards, policies, values, phases in val_dataloader:
+                boards = boards.to(device)
+                policies = policies.to(device)
+                values = values.to(device)
+                phases = phases.to(device)
+
+                try:
+                    pred_policies, pred_values, _, pred_phases = model(boards)
+                    loss_policy = policy_loss_fn(
+                        pred_policies, torch.argmax(policies, dim=1)
+                    )
+                    loss_value = value_loss_fn(pred_values.squeeze(), values)
+                    loss_phase = phase_loss_fn(pred_phases, phases)
+
+                    total_val_loss += (
+                        loss_policy.item() + loss_value.item() + loss_phase.item()
+                    )
+                except Exception as e:
+                    print(f"Error during validation: {e}")
+
+        avg_val_loss = total_val_loss / len(val_dataloader)
+
+        if avg_val_loss < best_loss:
+            best_loss = avg_val_loss
+            epochs_no_improve = 0
+            torch.save(model.state_dict(), "best_chess_model.pth")
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(
+                    f"Early stopping at epoch {epoch + 1}. Best validation loss: {best_loss:.4f}"
+                )
+                break
+
+        print(
+            f"Epoch {epoch + 1}/{epochs}, Train Loss: {total_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}"
+        )
+        model.train()
 
 
 if __name__ == "__main__":
-    ai_model = ChessNet().to(device)
-    optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
-    print(f"DirectML Detected: {device}")
-    choice = input("1. Tự chơi để lấy dữ liệu\n" 
-                    "2. Huấn luyện từ dữ liệu đã lấy được\n" 
-                    "Chọn: ").strip()
-    start_time = time.time()
-    if choice == "1":
-        num = int(input("Nhập số game: "))
-        self_play(ai_model, num_games=num, save_path=data_path)
-    elif choice == "2":
-        train_with(ai_model, optimizer, h5_file=data_path)
-        save_model(ai_model)
-    end_time = time.time()
-    print(
-        f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(end_time - start_time))}"
-    )
+    model = ChessNet().to(device)
+
+    while True:
+        print("\nChoose an option:")
+        print("1. Self-play and generate data")
+        print("2. Train model")
+        print("3. Exit")
+
+        choice = input("Enter your choice: ")
+        if choice == "1":
+            num_games = int(input("Enter number of self-play games: "))
+
+            output_file = (
+                input("Enter H5 file path (default: self_play_data.h5): ")
+                or "self_play_data.h5"
+            )
+            model.eval()
+            start_time = time.time()
+            self_play(model, num_games, output_file)
+            end_time = time.time()
+            print(
+                f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(end_time - start_time))}"
+            )
+        elif choice == "2":
+            h5_file = (
+                input("Enter H5 file path for training (default: self_play_data.h5): ")
+                or "self_play_data.h5"
+            )
+            dataset = ChessDataset(h5_file)
+            train_size = int(0.8 * len(dataset))
+            val_size = len(dataset) - train_size
+            train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+            train(model, train_dataset, val_dataset)
+            torch.save(model.state_dict(), "trained_chess_model.pth")
+            print("Model saved to trained_chess_model.pth")
+        elif choice == "3":
+            break
+        else:
+            print("Invalid choice. Please try again.")

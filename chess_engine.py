@@ -240,7 +240,7 @@ class GameState:
                 turn = self.board[row][column][0]
                 if (turn == 'w' and self.white_to_move) or (turn == 'b' and not self.white_to_move):
                     piece = self.board[row][column][1]
-                    self.move_functions[piece](row, column, moves)  # Cuộc gọi chức năng di chuyển dựa trên mảnh loại
+                    self.move_functions[piece](row, column, moves) 
         return moves
 
     def get_pawn_moves(self, row, column, moves):

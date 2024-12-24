@@ -31,7 +31,10 @@ class MCTSNode:
         return self.children[best_move_key]
 
 
-def mcts_rollout(ai_model, root):
+def mcts_rollout(ai_model, root, cache=None):
+    if cache is None:
+        cache = {}
+
     node = root
     while (
         not node.state.checkmate
@@ -42,6 +45,8 @@ def mcts_rollout(ai_model, root):
 
     if not node.state.checkmate and not node.state.stalemate:
         valid_moves = node.state.get_valid_moves()
+        new_states = []
+        new_nodes = []
         for move in valid_moves:
             move_key = (
                 move.start_row,
@@ -50,26 +55,40 @@ def mcts_rollout(ai_model, root):
                 move.end_column,
             )
 
-            # Tạo bản sao GameState để không ảnh hưởng trạng thái gốc
-            new_state = copy.deepcopy(node.state)
-            new_state.make_move(move)
+            if move_key not in node.children:
+                new_state = copy.deepcopy(node.state)
+                new_state.make_move(move)
+                new_node = MCTSNode(new_state, parent=node, move_key=move_key)
 
-            # Tạo node con
-            new_node = MCTSNode(new_state, parent=node, move_key=move_key)
-            policy, value, threats, phase = ai_model(
-                encode_board(new_state).unsqueeze(0)
-            )
-            new_node.prior = adjust_priority_based_on_phase(
-                policy[0][move_to_index(move)].item(), phase
-            )
+                policy, value, threats, phase = ai_model(
+                    encode_board(new_state).unsqueeze(0)
+                )
+                new_node.prior = adjust_priority_based_on_phase(
+                    policy[0][move_to_index(move)].item(), phase
+                )
 
-            # Lưu mối đe dọa cho bước này
-            new_node.threat_score = calculate_threat_score(new_state, threats)
-            node.children[move_key] = new_node
+                new_node.threat_score = calculate_threat_score(new_state, threats)
+                node.children[move_key] = new_node
 
-    # Lấy giá trị trạng thái và truyền ngược lại
-    _, value, _, _ = ai_model(encode_board(node.state).unsqueeze(0))
-    backpropagate(node, value.item())
+        # Xử lý batch inference
+        if new_states:
+            encoded_boards = torch.stack([encode_board(state) for state in new_states])
+            policies, values, *_ = ai_model(encoded_boards)
+
+            for i, new_node in enumerate(new_nodes):
+                move_index = move_to_index(valid_moves[i])
+                new_node.prior = policies[i][move_index].item()
+                cache[str(new_states[i].board)] = values[i].item()
+
+    state_key = str(node.state.board)
+    if state_key in cache:
+        value = cache[state_key]
+    else:
+        _, value, *_ = ai_model(encode_board(node.state).unsqueeze(0))
+        value = value.item()
+        cache[state_key] = value
+
+    backpropagate(node, value)
 
 
 def adjust_priority_based_on_phase(priority, phase):

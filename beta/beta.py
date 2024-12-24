@@ -2,11 +2,12 @@ import time
 import h5py
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from chess_neuron import *
-from chess_mcts import *
+from beta_neuron import *
+from beta_mcts import *
 from chess_engine import *
 
-model_path = "ai_model_beta.pth"
+# model_path = "ai_model_beta.pth"
+model_path = "ai_model_x.pth"
 data_path = "ai_data_beta.h5"
 
 
@@ -30,7 +31,7 @@ def calculate_reward(move, game_state):
     return reward
 
 
-def select_move(ai_model, game_state, mcts_iterations=10, epsilon=0.1):
+def select_move(ai_model, game_state, epsilon=0.1, mcts_iterations=100):
     """Chọn nước đi tốt nhất hoặc ngẫu nhiên với xác suất epsilon."""
     if np.random.rand() < epsilon:
         valid_moves = game_state.get_valid_moves()
@@ -39,9 +40,15 @@ def select_move(ai_model, game_state, mcts_iterations=10, epsilon=0.1):
     root = MCTSNode(game_state)
     for _ in range(mcts_iterations):
         mcts_rollout(ai_model, root)
+
     best_child = root.best_child(exploration_weight=0)
     for move in game_state.get_valid_moves():
-        if (move.start_row, move.start_column, move.end_row, move.end_column) == best_child.move_key:
+        if (
+            move.start_row,
+            move.start_column,
+            move.end_row,
+            move.end_column,
+        ) == best_child.move_key:
             return move
 
 
@@ -50,9 +57,11 @@ def self_play(ai_model, num_games=100, save_path=data_path):
     with h5py.File(save_path, "w") as h5file:
         for game_num in range(num_games):
             print(f"Đang chơi ván thứ {game_num + 1}/{num_games}...")
+            start_time = time.time()
             game_state = GameState()
             states, policies, rewards, actions = [], [], [], []
             cumulative_reward = 0
+            epsilon = 0.1 - ((game_num + 1) / (num_games * 10))
 
             while (
                 not game_state.checkmate
@@ -64,7 +73,7 @@ def self_play(ai_model, num_games=100, save_path=data_path):
                     break
 
                 state = encode_board(game_state)
-                move = select_move(ai_model, game_state)
+                move = select_move(ai_model, game_state, epsilon=epsilon)
                 if move not in valid_moves:
                     raise ValueError("Nước đi của AI không hợp lệ!")
 
@@ -73,7 +82,9 @@ def self_play(ai_model, num_games=100, save_path=data_path):
                 cumulative_reward += reward
 
                 states.append(state.tolist())
-                policies.append(np.zeros(4672, dtype=np.float32))
+                policy = np.zeros(4672, dtype=np.float32)
+                policy[valid_moves.index(move)] = 1.0
+                policies.append(policy)
                 rewards.append(cumulative_reward)
                 actions.append(move.get_chess_notation())
 
@@ -95,13 +106,25 @@ def self_play(ai_model, num_games=100, save_path=data_path):
             group.create_dataset("rewards", data=np.array(rewards, dtype=np.float32))
             group.create_dataset("actions", data=np.array(actions, dtype="S"))
 
-            print(f"Đã lưu dữ liệu ván {game_num + 1}.")
+            print(
+                f"Đã lưu dữ liệu ván {game_num + 1}, "
+                f"{time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}"
+            )
 
 
-def train_with(ai_model, optimizer, h5_file=data_path, epochs=10, batch_size=2048):
-    """Huấn luyện mô hình bằng dữ liệu trong file HDF5."""
+def train_with(
+    ai_model,
+    optimizer,
+    h5_file=data_path,
+    batch_size=256,
+    tolerance=1e-4,
+    patience=3,
+):
+    """Huấn luyện mô hình bằng dữ liệu trong file HDF5 với điều kiện dừng sớm."""
     ai_model.train()
     states, policies, values = [], [], []
+
+    # Đọc dữ liệu từ HDF5
     with h5py.File(h5_file, "r") as h5file:
         for game_key in h5file.keys():
             print(f"Đang lấy mẫu từ ván {game_key}")
@@ -123,8 +146,11 @@ def train_with(ai_model, optimizer, h5_file=data_path, epochs=10, batch_size=204
     )
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    print(f"Đang học")
-    for epoch in range(epochs):
+    best_loss = float("inf")
+    no_improve_count = 0
+    epoch = 0
+
+    while True:
         total_loss, total_policy_loss, total_value_loss = 0, 0, 0
         for batch_states, batch_policies, batch_values in data_loader:
             batch_states, batch_policies, batch_values = (
@@ -146,14 +172,27 @@ def train_with(ai_model, optimizer, h5_file=data_path, epochs=10, batch_size=204
             total_loss += loss.item()
             total_policy_loss += policy_loss.item()
             total_value_loss += value_loss.item()
+
+        avg_loss = total_loss / len(data_loader)
         epoch_log = (
-            f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss / len(data_loader):.4f}, "
+            f"Epoch {epoch + 1}, Avg Loss: {avg_loss:.4f}, "
             f"Policy Loss: {total_policy_loss / len(data_loader):.4f}, "
-            f"Value Loss: {total_value_loss / len(data_loader):.4f}\n"
+            f"Value Loss: {total_value_loss / len(data_loader):.4f}"
         )
         with open(f"training_log.txt", "a") as log_file:
             log_file.write(epoch_log)
         print(epoch_log)
+
+        # Kiểm tra dừng sớm
+        if best_loss - avg_loss < tolerance:
+            no_improve_count += 1
+            if no_improve_count >= patience:
+                print(f"Dừng huấn luyện sớm tại epoch {epoch + 1}.")
+                break
+        else:
+            no_improve_count = 0
+            best_loss = avg_loss
+            epoch += 1
 
 
 def save_model(ai_model, path=model_path):
@@ -172,18 +211,46 @@ def load_model(ai_model, path=model_path):
 if __name__ == "__main__":
     ai_model = ChessNet().to(device)
     optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
-    print(f"DirectML Detected: {device}")
-    choice = input(
-        "1. Tự chơi để lấy dữ liệu\n" "2. Huấn luyện từ dữ liệu đã lấy được\n" "Chọn: "
-    ).strip()
-    start_time = time.time()
-    if choice == "1":
-        num = int(input("Nhập số game: "))
-        self_play(ai_model, num_games=num, save_path=data_path)
-    elif choice == "2":
-        train_with(ai_model, optimizer, h5_file=data_path)
-        save_model(ai_model)
-    end_time = time.time()
-    print(
-        f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(end_time - start_time))}"
-    )
+    print(f"DirectML Detected: {torch_directml.device_name(0)}")
+
+    model_loaded = False
+    try:
+        load_model(ai_model, model_path)
+        model_loaded = True
+    except FileNotFoundError:
+        print("Không tìm thấy mô hình cũ. Sẽ tạo mô hình mới.")
+    except Exception as e:
+        print(f"Lỗi khi tải mô hình: {e}. Sẽ tạo mô hình mới.")
+    while True:
+        print("\nChọn chế độ:")
+        print("1. Tự chơi để lấy thêm dữ liệu")
+        print("2. Huấn luyện mô hình từ dữ liệu đã có")
+        print("0. Thoát")
+        choice = input("Nhập lựa chọn của bạn: ").strip()
+
+        if choice == "1":
+            if not model_loaded:
+                print(
+                    "Cảnh báo: Mô hình mới chưa được huấn luyện. Kết quả self-play có thể không tốt."
+                )
+            num = int(input("Nhập số game: "))
+            start_time = time.time()
+            self_play(ai_model, num_games=num, save_path=data_path)
+            print(
+                f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}"
+            )
+        elif choice == "2":
+            start_time = time.time()
+            train_with(ai_model, optimizer, h5_file=data_path)
+            save_model(ai_model)
+            print(
+                f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}"
+            )
+
+        elif choice == "0":
+            print("Đã thoát chương trình.")
+            break
+        else:
+            print("Lựa chọn không hợp lệ. Vui lòng thử lại.")
+
+        print("Hoàn tất một chu kỳ. Tiếp tục...")

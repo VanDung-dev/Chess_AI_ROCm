@@ -1,8 +1,8 @@
 import torch
 import chess
 import numpy as np
-from chess_engine import encode_board, move_to_index
-from chess_log import setup_logger
+from modules.chess_engine import encode_board, move_to_index
+from modules.chess_log import setup_logger
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = setup_logger()

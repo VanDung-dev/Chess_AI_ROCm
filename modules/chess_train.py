@@ -109,6 +109,41 @@ def train_with(ai_model, optimizer, data_dir="data", batch_size=256, tolerance=1
     torch.save(ai_model.state_dict(), model_path)
     logger.info(f"Đã lưu mô hình tại {model_path}")
 
+def analyze_data(data_dir):
+    """
+    Phân tích dữ liệu PGN để thống kê số lượng nước đi theo từng giai đoạn
+    """
+    print("\nPhân tích dữ liệu huấn luyện...")
+    pgn_files = [f for f in os.listdir(data_dir) if f.endswith(".pgn")]
+    stage_counts = {"Khai cuộc": 0, "Trung cuộc": 0, "Tàn cuộc": 0}
+    total_moves = 0
+
+    for filename in pgn_files:
+        file_path = os.path.join(data_dir, filename)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            while True:
+                game = chess.pgn.read_game(f)
+                if game is None:
+                    break
+
+                board = game.board()
+                for move in game.mainline_moves():
+                    piece_count = len(board.piece_map())
+                    if piece_count > 30:
+                        stage_counts["Khai cuộc"] += 1
+                    elif piece_count > 15:
+                        stage_counts["Trung cuộc"] += 1
+                    else:
+                        stage_counts["Tàn cuộc"] += 1
+                    total_moves += 1
+                    board.push(move)
+
+    print("Thống kê dữ liệu huấn luyện:")
+    for stage, count in stage_counts.items():
+        percentage = (count / total_moves) * 100 if total_moves > 0 else 0
+        print(f"{stage}: {count} nước đi ({percentage:.2f}%)")
+
+    return stage_counts, total_moves
 
 class ChessDataset:
     """
@@ -147,6 +182,20 @@ class ChessDataset:
             print(f"Tổng số ván cờ tải được: {len(self.games)}")
             total_moves = sum(len(list(game.mainline_moves())) for game in self.games)
             print(f"Tổng số nước đi trong dataset: {total_moves}")
+            # Phân tích dữ liệu trước khi huấn luyện
+            stage_counts, total_moves = analyze_data(data_dir)
+
+            # Kiểm tra nếu không có dữ liệu
+            if total_moves == 0:
+                logger.error("Không có dữ liệu huấn luyện!")
+                return
+
+            # Thêm thông tin giai đoạn vào dữ liệu
+            self.stage_info = {
+                "opening": 0,
+                "middlegame": 0,
+                "endgame": 0
+            }
             self.preprocess_and_save(preprocessed_path)
 
     def preprocess_and_save(self, save_path="data/preprocessed.pt"):
@@ -157,9 +206,27 @@ class ChessDataset:
                 tensor = encode_board(board)
                 move_idx = move_to_index(move)
                 piece_count = len(board.piece_map())
-                stage = 0 if piece_count > 30 else 1 if piece_count > 15 else 2
+
+                # Cập nhật thông tin giai đoạn
+                if piece_count > 30:
+                    stage = 0  # opening
+                    self.stage_info["opening"] += 1
+                elif piece_count > 15:
+                    stage = 1  # middlegame
+                    self.stage_info["middlegame"] += 1
+                else:
+                    stage = 2  # endgame
+                    self.stage_info["endgame"] += 1
+
                 processed_data.append((tensor, move_idx, 0.0, stage))
                 board.push(move)
+
+        # In thông tin giai đoạn
+        total = sum(self.stage_info.values())
+        print("\nPhân tích giai đoạn trong dataset:")
+        for stage, count in self.stage_info.items():
+            print(f"{stage}: {count} samples ({count / total * 100:.2f}%)")
+
         torch.save(processed_data, save_path)
         print(f"Đã lưu dữ liệu tiền xử lý vào {save_path}")
 
@@ -168,7 +235,12 @@ class ChessDataset:
 
     def __getitem__(self, idx):
         if hasattr(self, 'data'):
-            return self.data[idx]
+            # return self.data[idx]
+            tensor, move_idx, value, stage = self.data[idx]
+            # Trả về thêm thông tin giai đoạn dạng one-hot
+            stage_onehot = torch.zeros(3, dtype=torch.float32)
+            stage_onehot[stage] = 1.0
+            return tensor, torch.tensor(move_idx, dtype=torch.long), value, stage_onehot
         game_idx = 0
         move_count = 0
         for game in self.games:

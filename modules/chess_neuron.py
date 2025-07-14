@@ -25,10 +25,15 @@ class ChessNet(nn.Module):
             nn.ReLU(),
             nn.Linear(32, 3)  # Đầu ra giai đoạn: 3 lớp (khai cuộc, trung cuộc, tàn cuộc
         )
+        # Thêm layer để xử lý giai đoạn
+        self.stage_adjust = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU()
+        )
 
     def forward(self, x):
         """
-        Lan truyền tiến qua mạng nơ-ron.
+        Lan truyền tiến qua mạng nơ-ron với tích hợp thông tin giai đoạn.
 
         Args:
             x (torch.Tensor): Tensor đầu vào (batch_size, 16, 8, 8).
@@ -36,14 +41,42 @@ class ChessNet(nn.Module):
         Returns:
             tuple: (policy, value, stage) - Xác suất nước đi, giá trị bàn cờ, và giai đoạn trận đấu.
         """
+        # Tách thông tin giai đoạn từ kênh cuối cùng
+        batch_size = x.size(0)
+        stage_info = x[:, -1:, 0, 0]  # Lấy giá trị giai đoạn từ góc bàn cờ
+        stage_onehot = torch.zeros(batch_size, 3, device=x.device)
+
+        # Chuyển giá trị giai đoạn thành one-hot encoding
+        for i in range(batch_size):
+            if stage_info[i] < 0.33:  # Khai cuộc
+                stage_onehot[i, 0] = 1.0
+            elif stage_info[i] < 0.66:  # Trung cuộc
+                stage_onehot[i, 1] = 1.0
+            else:  # Tàn cuộc
+                stage_onehot[i, 2] = 1.0
+
+        # Xử lý CNN
         x = torch.relu(self.conv(x))
         x = self.residual_blocks(x)
+
+        # Xử lý Transformer
         x = x.view(x.size(0), -1, self.embedding_dim)
         x = self.transformer(x)
-        x = x.mean(dim=1)
+        x = x.mean(dim=1)  # Global average pooling
+
+        # Kết hợp thông tin giai đoạn
+        stage_features = self.stage_adjust(stage_onehot)
+        x = x + stage_features  # Thêm đặc trưng giai đoạn vào embedding
+
+        # Đầu ra policy (nước đi)
         policy = self.policy_head(x)
-        value = torch.tanh(self.value_head(x))
+
+        # Đầu ra value (giá trị bàn cờ)
+        value = torch.tanh(self.value_head(x))  # Giới hạn trong [-1, 1]
+
+        # Đầu ra stage (dự đoán lại giai đoạn để kiểm tra)
         stage = self.stage_head(x)
+
         return policy, value, stage
 
 

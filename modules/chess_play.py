@@ -2,9 +2,8 @@ import chess
 import os
 import time
 import chess.pgn
-from modules.chess_neuron import ChessNet
 from modules.chess_mcts import get_best_move
-from modules.chess_model import list_and_select_model, load_model, device
+from modules.chess_model import load_model
 
 
 def detect_game_stage(board):
@@ -17,15 +16,15 @@ def detect_game_stage(board):
     return "Tàn cuộc"
 
 
-def play_game(ai_model, human_color=chess.WHITE):
+def play_game(ai_model, human_color=chess.WHITE, data_dir = "data"):
     """
     Chơi một ván cờ vua giữa người và AI, sử dụng MCTS để điều khiển trò chơi.
 
     Args:
         ai_model: Mô hình AI (ChessNet).
         human_color (bool): Màu của người chơi (mặc định chess.WHITE).
+        data_dir (str): Thư mục chua file PGN.
     """
-    data_dir = "data"
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
     timestamp = time.strftime("%H%M_%d%m%Y")
@@ -168,10 +167,14 @@ def self_play(ai_model, num_games=100, save_dir="data"):
                 f"Đã lưu ván cờ {game_num + 1} vào {pgn_file_path}, thời gian: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
     print(f"Đã lưu tất cả {num_games} ván cờ vào {pgn_file_path}")
 
+def run_play(ai_model, model_path):
+    """
+    Chương trình chơi cờ với AI.
 
-if __name__ == "__main__":
-    ai_model = ChessNet().to(device)
-    model_path = list_and_select_model()
+    Args:
+        ai_model (ChessNet): Mô hình AI.
+        model_path (str): Đường dẫn đến file mô hình.
+    """
     if model_path is None:
         print("Không chọn mô hình. Thoát chương trình.")
         exit(1)

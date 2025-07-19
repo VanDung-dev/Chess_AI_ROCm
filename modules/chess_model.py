@@ -1,6 +1,6 @@
 import os
 import torch
-from chess_neuron import ChessNet
+from modules.chess_neuron import ChessNet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

@@ -4,6 +4,7 @@ import time
 import chess.pgn
 from modules.chess_mcts import get_best_move
 from modules.chess_model import load_model
+from modules.chess_config import DATA_PATH, MODEL_PATH
 
 
 def detect_game_stage(board):
@@ -16,20 +17,19 @@ def detect_game_stage(board):
     return "Tàn cuộc"
 
 
-def play_game(ai_model, human_color=chess.WHITE, data_dir = "data"):
+def play_game(ai_model, human_color=chess.WHITE):
     """
     Chơi một ván cờ vua giữa người và AI, sử dụng MCTS để điều khiển trò chơi.
 
     Args:
         ai_model: Mô hình AI (ChessNet).
         human_color (bool): Màu của người chơi (mặc định chess.WHITE).
-        data_dir (str): Thư mục chua file PGN.
     """
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if not os.path.exists(DATA_PATH):
+        os.makedirs(DATA_PATH)
     timestamp = time.strftime("%H%M_%d%m%Y")
     pgn_filename = f"HA_{timestamp}.pgn"
-    pgn_file_path = os.path.join(data_dir, pgn_filename)
+    pgn_file_path = os.path.join(DATA_PATH, pgn_filename)
 
     board = chess.Board()
     game = chess.pgn.Game()
@@ -115,20 +115,19 @@ def play_game(ai_model, human_color=chess.WHITE, data_dir = "data"):
         print("Hòa!")
 
 
-def self_play(ai_model, num_games=100, save_dir="data"):
+def self_play(ai_model, num_games=100):
     """
     AI tự chơi và lưu các ván cờ dưới dạng PGN, sử dụng MCTS để chọn nước đi.
 
     Args:
         ai_model: Mô hình AI (ChessNet).
         num_games (int): Số ván cờ cần chơi (mặc định 100).
-        save_dir (str): Thư mục lưu file PGN (mặc định "data").
     """
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    if not os.path.exists(DATA_PATH):
+        os.makedirs(DATA_PATH)
     timestamp = time.strftime("%H%M_%d%m%Y")
     pgn_filename = f"SP_{num_games}_{timestamp}.pgn"
-    pgn_file_path = os.path.join(save_dir, pgn_filename)
+    pgn_file_path = os.path.join(DATA_PATH, pgn_filename)
 
     with open(pgn_file_path, "w", encoding="utf-8") as pgn_file:
         for game_num in range(num_games):
@@ -167,19 +166,18 @@ def self_play(ai_model, num_games=100, save_dir="data"):
                 f"Đã lưu ván cờ {game_num + 1} vào {pgn_file_path}, thời gian: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
     print(f"Đã lưu tất cả {num_games} ván cờ vào {pgn_file_path}")
 
-def run_play(ai_model, model_path):
+def run_play(ai_model):
     """
     Chương trình chơi cờ với AI.
 
     Args:
         ai_model (ChessNet): Mô hình AI.
-        model_path (str): Đường dẫn đến file mô hình.
     """
-    if model_path is None:
+    if MODEL_PATH is None:
         print("Không chọn mô hình. Thoát chương trình.")
         exit(1)
-    elif model_path:
-        load_model(model_path)
+    else:
+        load_model()
 
     while True:
         print("\nChọn chế độ:")

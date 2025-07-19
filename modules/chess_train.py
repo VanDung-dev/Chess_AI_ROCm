@@ -9,16 +9,9 @@ import chess.engine
 from typing import List, Tuple
 from modules.chess_neuron import ChessNet
 from modules.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
-from modules.chess_model import load_model, device
-from modules.chess_log import setup_logger
+from modules.chess_model import load_model
+from modules.chess_config import STOCKFISH_PATH, DATA_PATH, MODEL_PATH, DEVICE, LOGGER
 
-# Khởi tạo logger
-logger = setup_logger()
-
-# Đường dẫn đến file thực thi Stockfish
-STOCKFISH_PATH = "./stockfish/stockfish-ubuntu-x86-64-avx2"  # Cần cập nhật đường dẫn thực tế
-DATA_DIR = "data"
-MODEL_DIR = "models"
 
 def get_game_result(pgn_game: chess.pgn.Game) -> float:
     """
@@ -55,7 +48,7 @@ def evaluate_position(engine: chess.engine.SimpleEngine, board: chess.Board) -> 
         score = info["score"].relative.score(mate_score=10000) / 100.0
         return max(min(score / 10.0, 1.0), -1.0)  # Chuẩn hóa về [-1, 1]
     except Exception as e:
-        logger.warning(f"Lỗi khi đánh giá vị trí: {e}")
+        LOGGER.warning(f"Lỗi khi đánh giá vị trí: {e}")
         return 0.0
 
 def propagate_values(values: List[float], gamma: float = 0.99) -> List[float]:
@@ -112,41 +105,38 @@ def get_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, top_k: 
         info = engine.analyse(board, chess.engine.Limit(time=0.1), multipv=top_k)
         return [pv["pv"][0] for pv in info]
     except Exception as e:
-        logger.warning(f"Lỗi khi lấy top moves: {e}")
+        LOGGER.warning(f"Lỗi khi lấy top moves: {e}")
         return list(board.legal_moves)[:top_k]
 
 class ChessDataset:
     """
     Dataset cho dữ liệu cờ vua từ các file PGN, hỗ trợ tăng cường dữ liệu và đánh giá Stockfish.
     """
-    def __init__(self, data_dir: str):
+    def __init__(self):
         """
         Khởi tạo dataset từ thư mục chứa file PGN.
-
-        Args:
-            data_dir (str): Thư mục chứa các file PGN.
         """
         self.games = []
         self.data = []
         self.stage_info = {"opening": 0, "middlegame": 0, "endgame": 0}
-        preprocessed_path = os.path.join(data_dir, "preprocessed.pt")
+        preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
 
         if os.path.exists(preprocessed_path):
             self.data = torch.load(preprocessed_path, weights_only=False)
-            logger.info(f"Đã tải dữ liệu tiền xử lý từ {preprocessed_path}")
+            LOGGER.info(f"Đã tải dữ liệu tiền xử lý từ {preprocessed_path}")
             return
 
-        if not os.path.exists(data_dir):
-            logger.error(f"Thư mục '{data_dir}' không tồn tại.")
+        if not os.path.exists(DATA_PATH):
+            LOGGER.error(f"Thư mục '{DATA_PATH}' không tồn tại.")
             return
 
-        pgn_files = [f for f in os.listdir(data_dir) if f.endswith(".pgn")]
-        logger.info(f"Tìm thấy {len(pgn_files)} file PGN: {pgn_files}")
+        pgn_files = [f for f in os.listdir(DATA_PATH) if f.endswith(".pgn")]
+        LOGGER.info(f"Tìm thấy {len(pgn_files)} file PGN: {pgn_files}")
 
         engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
         for filename in pgn_files:
-            file_path = os.path.join(data_dir, filename)
-            logger.info(f"Đọc file PGN: {file_path}")
+            file_path = os.path.join(DATA_PATH, filename)
+            LOGGER.info(f"Đọc file PGN: {file_path}")
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     game_count = 0
@@ -156,9 +146,9 @@ class ChessDataset:
                             break
                         self.games.append(game)
                         game_count += 1
-                    logger.info(f"Đã tải {game_count} ván cờ từ {filename}")
+                    LOGGER.info(f"Đã tải {game_count} ván cờ từ {filename}")
             except Exception as e:
-                logger.error(f"Lỗi khi đọc {filename}: {e}")
+                LOGGER.error(f"Lỗi khi đọc {filename}: {e}")
 
         self.preprocess_and_save(preprocessed_path, engine)
         engine.quit()
@@ -207,7 +197,7 @@ class ChessDataset:
                 for aug_board, transform in augmented_boards:
                     aug_move = transform(move) if transform else move
                     if not aug_board.is_legal(aug_move):
-                        logger.warning(f"Loại bỏ nước đi không hợp lệ: {aug_move.uci()} tại FEN: {aug_board.fen()}")
+                        LOGGER.warning(f"Loại bỏ nước đi không hợp lệ: {aug_move.uci()} tại FEN: {aug_board.fen()}")
                         continue
                     tensor = encode_board(aug_board)
                     move_idx = move_to_index(aug_move)
@@ -217,17 +207,17 @@ class ChessDataset:
                 if board.is_legal(move):
                     board.push(move)
                 else:
-                    logger.warning(f"Loại bỏ nước đi không hợp lệ: {move.uci()} tại FEN: {board.fen()}")
+                    LOGGER.warning(f"Loại bỏ nước đi không hợp lệ: {move.uci()} tại FEN: {board.fen()}")
                     continue
 
         total = sum(self.stage_info.values())
-        logger.info("\nPhân tích giai đoạn trong dataset:")
+        LOGGER.info("\nPhân tích giai đoạn trong dataset:")
         for stage, count in self.stage_info.items():
             percentage = count / total * 100 if total > 0 else 0
-            logger.info(f"{stage}: {count} samples ({percentage:.2f}%)")
+            LOGGER.info(f"{stage}: {count} samples ({percentage:.2f}%)")
 
         torch.save(processed_data, save_path)
-        logger.info(f"Đã lưu dữ liệu tiền xử lý vào {save_path}")
+        LOGGER.info(f"Đã lưu dữ liệu tiền xử lý vào {save_path}")
         self.data = processed_data
 
     def __len__(self) -> int:
@@ -253,23 +243,23 @@ class ChessDataset:
         tensor, move_idx, value, stage_onehot = self.data[idx]
         return tensor, torch.tensor(move_idx, dtype=torch.long), torch.tensor(value, dtype=torch.float32), stage_onehot
 
-def analyze_data(data_dir: str) -> Tuple[dict, int]:
+def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
     """
     Phân tích dữ liệu PGN để thống kê số lượng nước đi theo từng giai đoạn.
 
     Args:
-        data_dir (str): Thư mục chứa file PGN.
+        data_path (str): Thư mục chứa file PGN.
 
     Returns:
         Tuple[dict, int]: Từ điển chứa số lượng nước đi theo giai đoạn và tổng số nước đi.
     """
-    logger.info("\nPhân tích dữ liệu huấn luyện...")
-    pgn_files = [f for f in os.listdir(data_dir) if f.endswith(".pgn")]
+    LOGGER.info("\nPhân tích dữ liệu huấn luyện...")
+    pgn_files = [f for f in os.listdir(data_path) if f.endswith(".pgn")]
     stage_counts = {"Khai cuộc": 0, "Trung cuộc": 0, "Tàn cuộc": 0}
     total_moves = 0
 
     for filename in pgn_files:
-        file_path = os.path.join(data_dir, filename)
+        file_path = os.path.join(data_path, filename)
         with open(file_path, 'r', encoding='utf-8') as f:
             while True:
                 game = chess.pgn.read_game(f)
@@ -287,10 +277,10 @@ def analyze_data(data_dir: str) -> Tuple[dict, int]:
                     total_moves += 1
                     board.push(move)
 
-    logger.info("Thống kê dữ liệu huấn luyện:")
+    LOGGER.info("Thống kê dữ liệu huấn luyện:")
     for stage, count in stage_counts.items():
         percentage = (count / total_moves) * 100 if total_moves > 0 else 0
-        logger.info(f"{stage}: {count} nước đi ({percentage:.2f}%)")
+        LOGGER.info(f"{stage}: {count} nước đi ({percentage:.2f}%)")
     return stage_counts, total_moves
 
 def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
@@ -305,33 +295,33 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         tolerance (float): Ngưỡng dừng sớm.
         patience (int): Số epoch chờ trước khi dừng sớm.
     """
-    logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated(device) / 1e9:.2f} GB")
-    logger.info(f"GPU Memory Cached: {torch.cuda.memory_reserved(device) / 1e9:.2f} GB")
+    LOGGER.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated(DEVICE) / 1e9:.2f} GB")
+    LOGGER.info(f"GPU Memory Cached: {torch.cuda.memory_reserved(DEVICE) / 1e9:.2f} GB")
 
     try:
-        logger.info(f"Các backend có sẵn: {torch._dynamo.list_backends()}")
+        LOGGER.info(f"Các backend có sẵn: {torch._dynamo.list_backends()}")
         ai_model = torch.compile(ai_model, backend="inductor")
-        logger.info("Đã áp dụng torch.compile với backend inductor")
+        LOGGER.info("Đã áp dụng torch.compile với backend inductor")
     except Exception as e:
-        logger.warning(f"Không thể áp dụng torch.compile: {e}")
+        LOGGER.warning(f"Không thể áp dụng torch.compile: {e}")
 
     ai_model.train()
-    dataset = ChessDataset(DATA_DIR)
+    dataset = ChessDataset()
     if len(dataset) == 0:
-        logger.error("Lỗi: Không tìm thấy ván cờ hoặc nước đi hợp lệ trong dữ liệu.")
+        LOGGER.error("Lỗi: Không tìm thấy ván cờ hoặc nước đi hợp lệ trong dữ liệu.")
         return
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    logger.info(f"DataLoader được tạo với batch_size={batch_size}, kích thước dataset={len(dataset)}")
+    LOGGER.info(f"DataLoader được tạo với batch_size={batch_size}, kích thước dataset={len(dataset)}")
 
     for param in ai_model.parameters():
         param.data = param.data.float()
 
-    if not os.path.exists(MODEL_DIR):
-        os.makedirs(MODEL_DIR)
+    if not os.path.exists(MODEL_PATH):
+        os.makedirs(MODEL_PATH)
     conv_params = f"{ai_model.conv.out_channels}{ai_model.conv.in_channels}{ai_model.conv.kernel_size[0] * ai_model.conv.kernel_size[1]}"
     timestamp = time.strftime("%H%M_%d%m%Y")
     model_filename = f"{conv_params}_{timestamp}.pth"
-    model_path = os.path.join(MODEL_DIR, model_filename)
+    model_path = os.path.join(MODEL_PATH, model_filename)
 
     best_loss = float("inf")
     no_improve_count = 0
@@ -340,16 +330,16 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     while True:
         total_loss, total_policy_loss, total_value_loss, total_stage_loss = 0, 0, 0, 0
         for i, (batch_states, batch_policies, batch_values, batch_stages) in enumerate(data_loader):
-            logger.debug(f"Batch {i + 1}: GPU Memory Allocated: {torch.cuda.memory_allocated(device) / 1e9:.2f} GB")
-            batch_states = batch_states.to(device, dtype=torch.float32)
-            batch_policies = batch_policies.to(device, dtype=torch.long)
-            batch_values = batch_values.to(device, dtype=torch.float32)
-            batch_stages = batch_stages.to(device, dtype=torch.float32)
+            LOGGER.debug(f"Batch {i + 1}: GPU Memory Allocated: {torch.cuda.memory_allocated(DEVICE) / 1e9:.2f} GB")
+            batch_states = batch_states.to(DEVICE, dtype=torch.float32)
+            batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
+            batch_values = batch_values.to(DEVICE, dtype=torch.float32)
+            batch_stages = batch_stages.to(DEVICE, dtype=torch.float32)
             optimizer.zero_grad()
             try:
                 start_time = time.time()
                 predicted_policies, predicted_values, predicted_stages = ai_model(batch_states)
-                logger.debug(f"Batch {i + 1}: Thời gian forward pass: {time.time() - start_time:.4f}s")
+                LOGGER.debug(f"Batch {i + 1}: Thời gian forward pass: {time.time() - start_time:.4f}s")
                 policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
                 value_loss = torch.nn.functional.mse_loss(predicted_values.squeeze(-1), batch_values)
                 stage_loss = torch.nn.functional.cross_entropy(predicted_stages, batch_stages)
@@ -361,10 +351,10 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
                 total_value_loss += value_loss.item()
                 total_stage_loss += stage_loss.item()
             except Exception as e:
-                logger.error(f"Lỗi trong batch {i + 1}: {e}")
+                LOGGER.error(f"Lỗi trong batch {i + 1}: {e}")
                 raise
         if len(data_loader) == 0:
-            logger.error("DataLoader rỗng, không thể huấn luyện.")
+            LOGGER.error("DataLoader rỗng, không thể huấn luyện.")
             break
         avg_loss = total_loss / len(data_loader)
         epoch_log = (
@@ -373,12 +363,12 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
             f"Value Loss: {total_value_loss / len(data_loader):.4f}, "
             f"Stage Loss: {total_stage_loss / len(data_loader):.4f}"
         )
-        logger.info(epoch_log)
+        LOGGER.info(epoch_log)
 
         if best_loss - avg_loss < tolerance:
             no_improve_count += 1
             if no_improve_count >= patience:
-                logger.info(f"Dừng huấn luyện sớm tại epoch {epoch + 1}.")
+                LOGGER.info(f"Dừng huấn luyện sớm tại epoch {epoch + 1}.")
                 break
         else:
             no_improve_count = 0
@@ -386,31 +376,31 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         epoch += 1
 
     torch.save(ai_model.state_dict(), model_path)
-    logger.info(f"Đã lưu mô hình tại {model_path}")
+    LOGGER.info(f"Đã lưu mô hình tại {model_path}")
 
-def run_train(model_path):
+def run_train(model_path, data_path=DATA_PATH):
     """
     Chương trình học AI.
 
     Args:
         model_path (str): Đường dẫn đến file mô hình.
+        data_path (str): Đường dẫn đến thư mục dữ liệu.
     """
     global ai_model
     if model_path:
         ai_model = load_model(model_path)
     else:
-        logger.info("Không chọn mô hình. Khởi tạo mô hình mới.")
+        LOGGER.info("Không chọn mô hình. Khởi tạo mô hình mới.")
 
     optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
     start_time = time.time()
 
     # Kiểm tra và tạo thư mục data nếu chưa tồn tại
-    DATA_DIR = "data"
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-        logger.info(f"Đã tạo thư mục '{DATA_DIR}'")
+    if not os.path.exists(data_path):
+        os.makedirs(data_path)
+        LOGGER.info(f"Đã tạo thư mục '{data_path}'")
 
     train_with(ai_model, optimizer)
 
     elapsed_time = time.time() - start_time
-    logger.info(f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
+    LOGGER.info(f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")

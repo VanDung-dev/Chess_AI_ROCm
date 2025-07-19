@@ -1,13 +1,14 @@
 import os
 import torch
 from modules.chess_neuron import ChessNet
-from modules.chess_model import list_and_select_model, device
+from modules.chess_model import list_and_select_model
 from  modules.chess_train import run_train
 from modules.chess_play import run_play
+from modules.chess_config import DEVICE
 
 
 if __name__ == "__main__":
-    ai_model = ChessNet().to(device)
+    ai_model = ChessNet().to(DEVICE)
     model_path = list_and_select_model()
 
     # Biến để theo dõi đã thử fix GPU chưa

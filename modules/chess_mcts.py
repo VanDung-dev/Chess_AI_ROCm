@@ -2,10 +2,7 @@ import torch
 import chess
 import numpy as np
 from modules.chess_engine import encode_board, move_to_index
-from modules.chess_log import setup_logger
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-logger = setup_logger()
+from modules.chess_config import DEVICE, LOGGER
 
 
 class MCTSNode:
@@ -109,11 +106,11 @@ def mcts_rollout(ai_model, root, cache=None):
     path = []
 
     # Giai đoạn Selection
-    logger.info("Bắt đầu giai đoạn Selection...")
+    LOGGER.info("Bắt đầu giai đoạn Selection...")
     while not node.board.is_game_over() and node.is_fully_expanded():
         node = node.best_child()
         path.append(node)
-    logger.debug(f"Kết thúc giai đoạn Selection. Node hiện tại: {node.board.fen()}")
+    LOGGER.debug(f"Kết thúc giai đoạn Selection. Node hiện tại: {node.board.fen()}")
 
     # Giai đoạn Expansion
     if not node.board.is_game_over():
@@ -125,12 +122,12 @@ def mcts_rollout(ai_model, root, cache=None):
         if not unvisited_moves:
             return
 
-        logger.info(f"Bắt đầu giai đoạn Expansion. Thêm {len(unvisited_moves)} nút con.")
+        LOGGER.info(f"Bắt đầu giai đoạn Expansion. Thêm {len(unvisited_moves)} nút con.")
         for move in unvisited_moves:
             new_board = node.board.copy()
             new_board.push(move)
             new_node = MCTSNode(new_board, parent=node, move=move)
-            encoded = encode_board(new_board).unsqueeze(0).to(device, dtype=torch.float32)
+            encoded = encode_board(new_board).unsqueeze(0).to(DEVICE, dtype=torch.float32)
             policy, value, _ = ai_model(encoded)  # Bỏ qua giai đoạn từ mô hình
             move_index = move_to_index(move)
             policy_probs = torch.softmax(policy, dim=1)
@@ -144,27 +141,27 @@ def mcts_rollout(ai_model, root, cache=None):
                 max_prior = child.prior
                 best_child = child
         node = best_child
-        logger.info(f"Kết thúc giai đoạn Expansion. Node mới: {node.board.fen()}")
+        LOGGER.info(f"Kết thúc giai đoạn Expansion. Node mới: {node.board.fen()}")
 
     # Giai đoạn Simulation
     state_key = str(node.board.fen())
     if state_key not in cache:
-        encoded = encode_board(node.board).unsqueeze(0).to(device, dtype=torch.float32)
+        encoded = encode_board(node.board).unsqueeze(0).to(DEVICE, dtype=torch.float32)
         _, value, _ = ai_model(encoded)  # Bỏ qua giai đoạn từ mô hình
         value = value.item()
         cache[state_key] = value
     else:
         value = cache[state_key]
-    logger.info(f"Giai đoạn Simulation. Giá trị dự đoán: {value}")
+    LOGGER.info(f"Giai đoạn Simulation. Giá trị dự đoán: {value}")
 
     # Giai đoạn Backpropagation
-    logger.info("Bắt đầu giai đoạn Backpropagation...")
+    LOGGER.info("Bắt đầu giai đoạn Backpropagation...")
     current_node = node
     while current_node is not None:
         current_node.total_value += value if current_node.board.turn == root.board.turn else -value
         current_node.visit_count += 1
         current_node = current_node.parent
-    logger.info("Kết thúc giai đoạn Backpropagation.")
+    LOGGER.info("Kết thúc giai đoạn Backpropagation.")
 
 
 def get_best_move(model, board, mcts_iterations=100, temperature=1.0):
@@ -183,13 +180,13 @@ def get_best_move(model, board, mcts_iterations=100, temperature=1.0):
     root = MCTSNode(board)
     cache = {}
 
-    logger.info(f"Bắt đầu MCTS với {mcts_iterations} lần lặp...")
+    LOGGER.info(f"Bắt đầu MCTS với {mcts_iterations} lần lặp...")
     for i in range(mcts_iterations):
-        logger.debug(f"Lần lặp MCTS thứ {i + 1}/{mcts_iterations}")
+        LOGGER.debug(f"Lần lặp MCTS thứ {i + 1}/{mcts_iterations}")
         mcts_rollout(model, root, cache)
 
     if not root.children:
-        logger.info("Không tìm thấy nước đi hợp lệ.")
+        LOGGER.info("Không tìm thấy nước đi hợp lệ.")
         return None
 
     # Tính xác suất dựa trên số lần thăm
@@ -212,6 +209,6 @@ def get_best_move(model, board, mcts_iterations=100, temperature=1.0):
 
     # Chọn nước đi tốt nhất
     best_move = max(move_probs, key=move_probs.get)
-    logger.debug(f"Nước đi tốt nhất: {best_move.uci()}, Xác suất: {move_probs[best_move]:.4f}")
+    LOGGER.debug(f"Nước đi tốt nhất: {best_move.uci()}, Xác suất: {move_probs[best_move]:.4f}")
 
     return best_move

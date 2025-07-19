@@ -1,36 +1,62 @@
 import os
-import subprocess
-import sys
 import torch
+from modules.chess_neuron import ChessNet
+from modules.chess_model import list_and_select_model, device
+from  modules.chess_train import run_train
+from modules.chess_play import run_play
+
 
 if __name__ == "__main__":
-    # Đặt biến môi trường cho ROCm 6.3
-    os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0"
+    ai_model = ChessNet().to(device)
+    model_path = list_and_select_model()
 
-    # Kiểm tra GPU và ROCm
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
+    # Biến để theo dõi đã thử fix GPU chưa
+    tried_fix_gpu = False
+
+    # Hàm kiểm tra GPU
+    def check_gpu():
+        if torch.cuda.is_available():
+            return torch.device("cuda"), True
+        else:
+            return torch.device("cpu"), False
+
+    # Lần đầu: thử kiểm tra GPU mà không set HSA_OVERRIDE_GFX_VERSION
+    device, success = check_gpu()
+
+    if not success:
+        print("Không phát hiện GPU. Đang cố gắng sửa bằng cách đặt HSA_OVERRIDE_GFX_VERSION...")
+        os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0"
+        device, success = check_gpu()
+        tried_fix_gpu = True
+
+    # Kiểm tra thành công hay không
+    if success:
+        if tried_fix_gpu:
+            print("Đã sửa thành công: Phát hiện GPU sau khi áp dụng HSA_OVERRIDE_GFX_VERSION.")
         print(f"Đang sử dụng GPU: {torch.cuda.get_device_name(0)}")
         print(f"Phiên bản ROCm: {torch.version.hip}")
         print(f"Phiên bản PyTorch: {torch.__version__}")
     else:
-        device = torch.device("cpu")
         print("Không tìm thấy GPU, đang sử dụng CPU.")
-        sys.exit(1)
+        device = torch.device("cpu")
 
-    python_executable = ".venv/bin/python" if not os.path.exists("/.dockerenv") else "python3"
-    print(
-        "1. chess_train.py\n"
-        "2. chess_play.py\n"
-    )
+    # Hiển thị menu chọn chức năng
+    while True:
+        print(
+            "\nChọn chức năng:\n"
+            "1. Huấn luyện AI\n"
+            "2. Chơi cờ với AI\n"
+            "0. Thoát chương trình"
+        )
+        choose = input("Nhập lựa chọn của bạn (0/1/2): ").strip()
 
-    choose = input("Choose: ")
-    if choose == "1":
-        script_path = "modules/chess_train.py"
-    elif choose == "2":
-        script_path = "modules/chess_play.py"
-    else:
-        print("Invalid choice")
-        sys.exit(1)
+        if choose == "1":
+            run_train(model_path)
+        elif choose == "2":
+            run_play(ai_model,  model_path)
+        elif choose == "0":
+            print("Thoát chương trình.")
+            break
+        else:
+            print("Lựa chọn không hợp lệ. Vui lòng thử lại.")
 
-    subprocess.run([python_executable, script_path])

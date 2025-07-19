@@ -9,7 +9,7 @@ import chess.engine
 from typing import List, Tuple
 from modules.chess_neuron import ChessNet
 from modules.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
-from modules.chess_model import list_and_select_model, load_model, device
+from modules.chess_model import load_model, device
 from modules.chess_log import setup_logger
 
 # Khởi tạo logger
@@ -17,6 +17,8 @@ logger = setup_logger()
 
 # Đường dẫn đến file thực thi Stockfish
 STOCKFISH_PATH = "./stockfish/stockfish-ubuntu-x86-64-avx2"  # Cần cập nhật đường dẫn thực tế
+DATA_DIR = "data"
+MODEL_DIR = "models"
 
 def get_game_result(pgn_game: chess.pgn.Game) -> float:
     """
@@ -291,7 +293,7 @@ def analyze_data(data_dir: str) -> Tuple[dict, int]:
         logger.info(f"{stage}: {count} nước đi ({percentage:.2f}%)")
     return stage_counts, total_moves
 
-def train_with(ai_model: ChessNet, optimizer: optim.Optimizer, data_dir: str = "data",
+def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
                batch_size: int = 256, tolerance: float = 1e-4, patience: int = 3) -> None:
     """
     Huấn luyện mô hình AI với dữ liệu PGN.
@@ -299,7 +301,6 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer, data_dir: str = "
     Args:
         ai_model (ChessNet): Mô hình AI cần huấn luyện.
         optimizer (optim.Optimizer): Bộ tối ưu hóa.
-        data_dir (str): Thư mục chứa file PGN.
         batch_size (int): Kích thước batch.
         tolerance (float): Ngưỡng dừng sớm.
         patience (int): Số epoch chờ trước khi dừng sớm.
@@ -315,7 +316,7 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer, data_dir: str = "
         logger.warning(f"Không thể áp dụng torch.compile: {e}")
 
     ai_model.train()
-    dataset = ChessDataset(data_dir)
+    dataset = ChessDataset(DATA_DIR)
     if len(dataset) == 0:
         logger.error("Lỗi: Không tìm thấy ván cờ hoặc nước đi hợp lệ trong dữ liệu.")
         return
@@ -324,13 +325,13 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer, data_dir: str = "
 
     for param in ai_model.parameters():
         param.data = param.data.float()
-    model_dir = "../model"
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
+
+    if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
     conv_params = f"{ai_model.conv.out_channels}{ai_model.conv.in_channels}{ai_model.conv.kernel_size[0] * ai_model.conv.kernel_size[1]}"
     timestamp = time.strftime("%H%M_%d%m%Y")
     model_filename = f"{conv_params}_{timestamp}.pth"
-    model_path = os.path.join(model_dir, model_filename)
+    model_path = os.path.join(MODEL_DIR, model_filename)
 
     best_loss = float("inf")
     no_improve_count = 0
@@ -387,9 +388,14 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer, data_dir: str = "
     torch.save(ai_model.state_dict(), model_path)
     logger.info(f"Đã lưu mô hình tại {model_path}")
 
-if __name__ == "__main__":
-    ai_model = ChessNet().to(device)
-    model_path = list_and_select_model()
+def run_train(model_path):
+    """
+    Chương trình học AI.
+
+    Args:
+        model_path (str): Đường dẫn đến file mô hình.
+    """
+    global ai_model
     if model_path:
         ai_model = load_model(model_path)
     else:
@@ -399,12 +405,12 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # Kiểm tra và tạo thư mục data nếu chưa tồn tại
-    data_dir = "./data"
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-        logger.info(f"Đã tạo thư mục '{data_dir}'")
+    DATA_DIR = "data"
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+        logger.info(f"Đã tạo thư mục '{DATA_DIR}'")
 
-    train_with(ai_model, optimizer, data_dir=data_dir)
+    train_with(ai_model, optimizer)
 
     elapsed_time = time.time() - start_time
     logger.info(f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")

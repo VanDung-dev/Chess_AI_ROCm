@@ -27,7 +27,7 @@ def play_game(ai_model, human_color=chess.WHITE):
     """
     if not os.path.exists(DATA_PATH):
         os.makedirs(DATA_PATH)
-    timestamp = time.strftime("%H%M_%d%m%Y")
+    timestamp = time.strftime("%Y%m%d%_H%M")
     pgn_filename = f"HA_{timestamp}.pgn"
     pgn_file_path = os.path.join(DATA_PATH, pgn_filename)
 
@@ -125,7 +125,7 @@ def self_play(ai_model, num_games=100):
     """
     if not os.path.exists(DATA_PATH):
         os.makedirs(DATA_PATH)
-    timestamp = time.strftime("%H%M_%d%m%Y")
+    timestamp = time.strftime("%Y%m%d%_H%M")
     pgn_filename = f"SP_{num_games}_{timestamp}.pgn"
     pgn_file_path = os.path.join(DATA_PATH, pgn_filename)
 

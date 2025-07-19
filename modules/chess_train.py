@@ -319,7 +319,7 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     if not os.path.exists(MODEL_PATH):
         os.makedirs(MODEL_PATH)
     conv_params = f"{ai_model.conv.out_channels}{ai_model.conv.in_channels}{ai_model.conv.kernel_size[0] * ai_model.conv.kernel_size[1]}"
-    timestamp = time.strftime("%H%M_%d%m%Y")
+    timestamp = time.strftime("%Y%m%d%_H%M")
     model_filename = f"{conv_params}_{timestamp}.pth"
     model_path = os.path.join(MODEL_PATH, model_filename)
 

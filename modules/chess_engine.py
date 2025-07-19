@@ -94,3 +94,37 @@ def move_to_index(move):
     start_idx = move.from_square
     end_idx = move.to_square
     return start_idx * 64 + end_idx
+
+def flip_vertical(move: chess.Move) -> chess.Move:
+    """
+    Lật nước đi theo chiều dọc (đảo tọa độ hàng từ trên xuống dưới và ngược lại).
+
+    Args:
+        move (chess.Move): Nước đi ban đầu.
+
+    Returns:
+        chess.Move: Nước đi đã được lật theo chiều dọc.
+    """
+    from_square = move.from_square
+    to_square = move.to_square
+    # Lật theo trục dọc (từ rank 0 sang rank 7)
+    flipped_from = chess.square(chess.square_file(from_square), 7 - chess.square_rank(from_square))
+    flipped_to = chess.square(chess.square_file(to_square), 7 - chess.square_rank(to_square))
+    return chess.Move(flipped_from, flipped_to, move.promotion, move.drop)
+
+def flip_horizontal(move: chess.Move) -> chess.Move:
+    """
+    Lật nước đi theo chiều ngang (đảo tọa độ cột trái-phải).
+
+    Args:
+        move (chess.Move): Nước đi ban đầu.
+
+    Returns:
+        chess.Move: Nước đi đã được lật theo chiều ngang.
+    """
+    from_square = move.from_square
+    to_square = move.to_square
+    # Lật theo trục ngang (từ file 0 sang file 7)
+    flipped_from = chess.square(7 - chess.square_file(from_square), chess.square_rank(from_square))
+    flipped_to = chess.square(7 - chess.square_file(to_square), chess.square_rank(to_square))
+    return chess.Move(flipped_from, flipped_to, move.promotion, move.drop)

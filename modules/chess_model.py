@@ -34,16 +34,19 @@ def list_and_select_model():
             print("Đầu vào không hợp lệ. Vui lòng nhập số hoặc 'quit'.")
 
 
-def load_model():
+def load_model(model_path):
     """
     Tải mô hình ChessNet đã huấn luyện từ file .pth.
     """
     model = ChessNet().to(DEVICE)
     try:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True), strict=False)
+        model.load_state_dict(
+            torch.load(model_path, map_location=DEVICE, weights_only=True),
+            strict=False
+        )
         model.eval()
-        print(f"Đã tải mô hình thành công từ {MODEL_PATH}")
+        print(f"Đã tải mô hình thành công từ {model_path}")
     except FileNotFoundError:
-        print(f"Lỗi: Không tìm thấy file '{MODEL_PATH}'.")
+        print(f"Lỗi: Không tìm thấy file '{model_path}'.")
         raise
     return model

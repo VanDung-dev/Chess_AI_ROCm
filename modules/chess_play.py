@@ -166,18 +166,19 @@ def self_play(ai_model, num_games=100):
                 f"Đã lưu ván cờ {game_num + 1} vào {pgn_file_path}, thời gian: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
     print(f"Đã lưu tất cả {num_games} ván cờ vào {pgn_file_path}")
 
-def run_play(ai_model):
+def run_play(ai_model, selected_model_path):
     """
     Chương trình chơi cờ với AI.
 
     Args:
         ai_model (ChessNet): Mô hình AI.
+        selected_model_path (str): Đường dạng file .pth của mô hình chọn.
     """
     if MODEL_PATH is None:
         print("Không chọn mô hình. Thoát chương trình.")
         exit(1)
     else:
-        load_model()
+        load_model(selected_model_path)
 
     while True:
         print("\nChọn chế độ:")

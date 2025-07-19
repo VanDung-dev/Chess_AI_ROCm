@@ -2,11 +2,12 @@ import time
 import os
 import torch
 import torch.optim as optim
+from torch import Tensor
 from torch.utils.data import DataLoader
 import chess
 import chess.pgn
 import chess.engine
-from typing import List, Tuple
+from typing import List, Tuple, Any
 from modules.chess_neuron import ChessNet
 from modules.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
 from modules.chess_model import load_model
@@ -229,7 +230,7 @@ class ChessDataset:
         """
         return len(self.data)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, float, torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[Any, Tensor, Tensor, Any]:
         """
         Lấy mẫu dữ liệu tại chỉ số idx.
 
@@ -378,17 +379,16 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     torch.save(ai_model.state_dict(), model_path)
     LOGGER.info(f"Đã lưu mô hình tại {model_path}")
 
-def run_train(model_path, data_path=DATA_PATH):
+def run_train(selected_model_path):
     """
     Chương trình học AI.
 
     Args:
-        model_path (str): Đường dẫn đến file mô hình.
-        data_path (str): Đường dẫn đến thư mục dữ liệu.
+        selected_model_path (str): Đường dạng file .pth của mô hình chọn.
     """
     global ai_model
-    if model_path:
-        ai_model = load_model(model_path)
+    if MODEL_PATH:
+        ai_model = load_model(selected_model_path)
     else:
         LOGGER.info("Không chọn mô hình. Khởi tạo mô hình mới.")
 
@@ -396,9 +396,9 @@ def run_train(model_path, data_path=DATA_PATH):
     start_time = time.time()
 
     # Kiểm tra và tạo thư mục data nếu chưa tồn tại
-    if not os.path.exists(data_path):
-        os.makedirs(data_path)
-        LOGGER.info(f"Đã tạo thư mục '{data_path}'")
+    if not os.path.exists(DATA_PATH):
+        os.makedirs(DATA_PATH)
+        LOGGER.info(f"Đã tạo thư mục '{DATA_PATH}'")
 
     train_with(ai_model, optimizer)
 

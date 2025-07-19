@@ -9,7 +9,7 @@ from modules.chess_config import DEVICE
 
 if __name__ == "__main__":
     ai_model = ChessNet().to(DEVICE)
-    model_path = list_and_select_model()
+    selected_model_path = list_and_select_model()
 
     # Biến để theo dõi đã thử fix GPU chưa
     tried_fix_gpu = False
@@ -52,9 +52,9 @@ if __name__ == "__main__":
         choose = input("Nhập lựa chọn của bạn (0/1/2): ").strip()
 
         if choose == "1":
-            run_train(model_path)
+            run_train(selected_model_path)
         elif choose == "2":
-            run_play(ai_model,  model_path)
+            run_play(ai_model, selected_model_path)
         elif choose == "0":
             print("Thoát chương trình.")
             break

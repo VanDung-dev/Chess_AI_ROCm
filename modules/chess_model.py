@@ -1,19 +1,19 @@
 import os
 import torch
 from modules.chess_neuron import ChessNet
-from modules.chess_config import MODEL_PATH, DEVICE
+from modules.chess_config import DEVICE
 
-def list_and_select_model():
+def list_and_select_model(model_path):
     """
     Hiển thị danh sách các mô hình .pth trong thư mục và cho phép người dùng chọn.
     """
-    if not os.path.exists(MODEL_PATH):
-        print(f"Lỗi: Thư mục '{MODEL_PATH}' không tồn tại.")
+    if not os.path.exists(model_path):
+        print(f"Lỗi: Thư mục '{model_path}' không tồn tại.")
         return None
 
-    pth_files = [f for f in os.listdir(MODEL_PATH) if f.endswith(".pth")]
+    pth_files = [f for f in os.listdir(model_path) if f.endswith(".pth")]
     if not pth_files:
-        print(f"Lỗi: Không tìm thấy file .pth nào trong '{MODEL_PATH}'.")
+        print(f"Lỗi: Không tìm thấy file .pth nào trong '{model_path}'.")
         return None
 
     print("\nDanh sách mô hình có sẵn:")
@@ -27,7 +27,7 @@ def list_and_select_model():
                 return None
             choice = int(choice)
             if 1 <= choice <= len(pth_files):
-                return os.path.join(MODEL_PATH, pth_files[choice - 1])
+                return os.path.join(model_path, pth_files[choice - 1])
             else:
                 print(f"Vui lòng nhập số từ 1 đến {len(pth_files)}.")
         except ValueError:

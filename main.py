@@ -2,7 +2,7 @@ import os
 import torch
 from modules.chess_neuron import ChessNet
 from modules.chess_model import list_and_select_model
-from  modules.chess_train import run_train
+from modules.chess_train import run_train
 from modules.chess_play import run_play
 from modules.chess_config import DEVICE
 from stockfish.download_stockfish import download_stockfish

@@ -296,9 +296,6 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         tolerance (float): Ngưỡng dừng sớm.
         patience (int): Số epoch chờ trước khi dừng sớm.
     """
-    LOGGER.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated(DEVICE) / 1e9:.2f} GB")
-    LOGGER.info(f"GPU Memory Cached: {torch.cuda.memory_reserved(DEVICE) / 1e9:.2f} GB")
-
     try:
         LOGGER.info(f"Các backend có sẵn: {torch._dynamo.list_backends()}")
         ai_model = torch.compile(ai_model, backend="inductor")
@@ -387,9 +384,10 @@ def run_train(selected_model_path):
         selected_model_path (str): Đường dạng file .pth của mô hình chọn.
     """
     global ai_model
-    if MODEL_PATH:
+    if selected_model_path and os.path.exists(selected_model_path):
         ai_model = load_model(selected_model_path)
     else:
+        ai_model = ChessNet().to(DEVICE)
         LOGGER.info("Không chọn mô hình. Khởi tạo mô hình mới.")
 
     optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)

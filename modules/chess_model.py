@@ -22,8 +22,8 @@ def list_and_select_model():
 
     while True:
         try:
-            choice = input("Chọn mô hình (nhập số hoặc 'quit' để thoát): ").strip()
-            if choice.lower() == "quit":
+            choice = input("Chọn mô hình (nhập số hoặc '0' để không sử dụng mô hình): ").strip()
+            if choice.lower() == "0":
                 return None
             choice = int(choice)
             if 1 <= choice <= len(pth_files):

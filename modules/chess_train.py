@@ -383,6 +383,12 @@ def run_train(selected_model_path):
     Args:
         selected_model_path (str): Đường dạng file .pth của mô hình chọn.
     """
+    preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
+    if os.path.exists(preprocessed_path):
+        use_preprocessed = input("Tập tin preprocessed.pt đã tồn tại. Bạn có muốn sử dụng nó để huấn luyện không? (y/n): ").strip().lower()
+        if use_preprocessed != 'y':
+            os.remove(preprocessed_path)
+            LOGGER.info(f"Đã xóa tập tin preprocessed.pt cũ.")
     global ai_model
     if selected_model_path and os.path.exists(selected_model_path):
         ai_model = load_model(selected_model_path)

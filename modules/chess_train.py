@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import chess
 import chess.pgn
 import chess.engine
+from tqdm import tqdm
 from typing import List, Tuple, Any
 from modules.chess_neuron import ChessNet
 from modules.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
@@ -134,10 +135,9 @@ class ChessDataset:
         pgn_files = [f for f in os.listdir(DATA_PATH) if f.endswith(".pgn")]
         LOGGER.info(f"Tìm thấy {len(pgn_files)} file PGN: {pgn_files}")
 
-        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-        for filename in pgn_files:
+        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH, debug=False)
+        for filename in tqdm(pgn_files, desc="Đang đọc PGN files", total=len(pgn_files)):
             file_path = os.path.join(DATA_PATH, filename)
-            LOGGER.info(f"Đọc file PGN: {file_path}")
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     game_count = 0
@@ -147,7 +147,6 @@ class ChessDataset:
                             break
                         self.games.append(game)
                         game_count += 1
-                    LOGGER.info(f"Đã tải {game_count} ván cờ từ {filename}")
             except Exception as e:
                 LOGGER.error(f"Lỗi khi đọc {filename}: {e}")
 
@@ -165,7 +164,7 @@ class ChessDataset:
         processed_data = []
         total_moves = 0
 
-        for game in self.games:
+        for game in tqdm(self.games, desc="Tiền xử lý dữ liệu", total=len(self.games)):
             board = game.board()
             final_value = get_game_result(game)
             values = []
@@ -198,7 +197,6 @@ class ChessDataset:
                 for aug_board, transform in augmented_boards:
                     aug_move = transform(move) if transform else move
                     if not aug_board.is_legal(aug_move):
-                        LOGGER.warning(f"Loại bỏ nước đi không hợp lệ: {aug_move.uci()} tại FEN: {aug_board.fen()}")
                         continue
                     tensor = encode_board(aug_board)
                     move_idx = move_to_index(aug_move)
@@ -208,14 +206,7 @@ class ChessDataset:
                 if board.is_legal(move):
                     board.push(move)
                 else:
-                    LOGGER.warning(f"Loại bỏ nước đi không hợp lệ: {move.uci()} tại FEN: {board.fen()}")
                     continue
-
-        total = sum(self.stage_info.values())
-        LOGGER.info("\nPhân tích giai đoạn trong dataset:")
-        for stage, count in self.stage_info.items():
-            percentage = count / total * 100 if total > 0 else 0
-            LOGGER.info(f"{stage}: {count} samples ({percentage:.2f}%)")
 
         torch.save(processed_data, save_path)
         LOGGER.info(f"Đã lưu dữ liệu tiền xử lý vào {save_path}")
@@ -259,7 +250,7 @@ def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
     stage_counts = {"Khai cuộc": 0, "Trung cuộc": 0, "Tàn cuộc": 0}
     total_moves = 0
 
-    for filename in pgn_files:
+    for filename in tqdm(pgn_files, desc="Phân tích dữ liệu", total=len(pgn_files)):
         file_path = os.path.join(data_path, filename)
         with open(file_path, 'r', encoding='utf-8') as f:
             while True:
@@ -278,10 +269,6 @@ def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
                     total_moves += 1
                     board.push(move)
 
-    LOGGER.info("Thống kê dữ liệu huấn luyện:")
-    for stage, count in stage_counts.items():
-        percentage = (count / total_moves) * 100 if total_moves > 0 else 0
-        LOGGER.info(f"{stage}: {count} nước đi ({percentage:.2f}%)")
     return stage_counts, total_moves
 
 def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
@@ -328,16 +315,13 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     while True:
         total_loss, total_policy_loss, total_value_loss, total_stage_loss = 0, 0, 0, 0
         for i, (batch_states, batch_policies, batch_values, batch_stages) in enumerate(data_loader):
-            LOGGER.debug(f"Batch {i + 1}: GPU Memory Allocated: {torch.cuda.memory_allocated(DEVICE) / 1e9:.2f} GB")
             batch_states = batch_states.to(DEVICE, dtype=torch.float32)
             batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
             batch_values = batch_values.to(DEVICE, dtype=torch.float32)
             batch_stages = batch_stages.to(DEVICE, dtype=torch.float32)
             optimizer.zero_grad()
             try:
-                start_time = time.time()
                 predicted_policies, predicted_values, predicted_stages = ai_model(batch_states)
-                LOGGER.debug(f"Batch {i + 1}: Thời gian forward pass: {time.time() - start_time:.4f}s")
                 policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
                 value_loss = torch.nn.functional.mse_loss(predicted_values.squeeze(-1), batch_values)
                 stage_loss = torch.nn.functional.cross_entropy(predicted_stages, batch_stages)

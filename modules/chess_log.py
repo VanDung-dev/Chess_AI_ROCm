@@ -1,6 +1,8 @@
 import logging
 from colorlog import ColoredFormatter
 
+logging.getLogger("chess").setLevel(logging.CRITICAL)
+
 def setup_logger():
     logger = logging.getLogger()
     if not logger.handlers:

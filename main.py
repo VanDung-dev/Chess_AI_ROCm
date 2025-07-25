@@ -4,14 +4,14 @@ from modules.chess_neuron import ChessNet
 from modules.chess_model import list_and_select_model
 from modules.chess_train import run_train
 from modules.chess_play import run_play
-from modules.chess_config import DEVICE
+from modules.chess_config import DEVICE, MODEL_PATH
 from stockfish.download_stockfish import download_stockfish
 
 
 if __name__ == "__main__":
     download_stockfish()
     ai_model = ChessNet().to(DEVICE)
-    selected_model_path = list_and_select_model()
+    selected_model_path = list_and_select_model(MODEL_PATH)
 
     # Biến để theo dõi đã thử fix GPU chưa
     tried_fix_gpu = False

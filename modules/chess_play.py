@@ -4,7 +4,8 @@ import time
 import chess.pgn
 from modules.chess_mcts import get_best_move
 from modules.chess_model import load_model
-from modules.chess_config import DATA_PATH, MODEL_PATH
+from modules.chess_config import DATA_PATH, DEVICE
+from modules.chess_neuron import ChessNet
 
 
 def detect_game_stage(board):
@@ -166,19 +167,22 @@ def self_play(ai_model, num_games=100):
                 f"Đã lưu ván cờ {game_num + 1} vào {pgn_file_path}, thời gian: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
     print(f"Đã lưu tất cả {num_games} ván cờ vào {pgn_file_path}")
 
-def run_play(ai_model, selected_model_path):
+
+def run_play(selected_model_path=None):
     """
     Chương trình chơi cờ với AI.
 
     Args:
-        ai_model (ChessNet): Mô hình AI.
-        selected_model_path (str): Đường dạng file .pth của mô hình chọn.
+        selected_model_path (str): Đường dẫn file .pth của mô hình chọn, nếu có.
     """
-    if MODEL_PATH is None:
-        print("Không chọn mô hình. Thoát chương trình.")
-        exit(1)
+    # Nếu không có mô hình được chọn hoặc mô hình không tồn tại, khởi tạo mô hình mới
+    if not selected_model_path or not os.path.exists(selected_model_path):
+        print("Không tìm thấy mô hình đã huấn luyện. Khởi tạo mô hình ChessNet mới với trọng số ngẫu nhiên.")
+        ai_model = ChessNet().to(DEVICE)
+        ai_model.eval()
     else:
-        load_model(selected_model_path)
+        print(f"Tải mô hình từ {selected_model_path}")
+        ai_model = load_model(selected_model_path)
 
     while True:
         print("\nChọn chế độ:")

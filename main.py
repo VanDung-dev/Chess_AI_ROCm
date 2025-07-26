@@ -56,7 +56,7 @@ if __name__ == "__main__":
         if choose == "1":
             run_train(selected_model_path)
         elif choose == "2":
-            run_play(ai_model, selected_model_path)
+            run_play(selected_model_path)
         elif choose == "0":
             print("Thoát chương trình.")
             break

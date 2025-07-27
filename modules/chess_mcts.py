@@ -5,10 +5,23 @@ from collections import OrderedDict
 from modules.chess_engine import encode_board, move_to_index
 from modules.chess_config import DEVICE
 
-# Global cache với LRU eviction
-GLOBAL_CACHE = OrderedDict()
-CACHE_SIZE_LIMIT = 5000
+# Bảng Zobrist hashing
+ZOBRIST_TABLE = None
+ZOBRIST_TURN = np.random.randint(1, 2**63, dtype=np.int64)
+ZOBRIST_CASTLING = np.random.randint(1, 2**63, (4,), dtype=np.int64)
+ZOBRIST_EN_PASSANT = np.random.randint(1, 2**63, (8,), dtype=np.int64)
 
+def initialize_zobrist_table():
+    global ZOBRIST_TABLE
+    if ZOBRIST_TABLE is None:
+        ZOBRIST_TABLE = np.random.randint(1, 2**63, (12, 64), dtype=np.int64)
+
+# Khởi tạo bảng Zobrist
+initialize_zobrist_table()
+
+# Bộ nhớ cache toàn cầu với LRU trục xuất
+GLOBAL_CACHE = OrderedDict()
+CACHE_SIZE_LIMIT = 10000
 class MCTSNode:
     def __init__(self, board, parent=None, move=None):
         """
@@ -26,8 +39,8 @@ class MCTSNode:
         self.total_value = 0
         self.prior = 0
         self.move = move
-        self.heuristic_value = self.calculate_heuristic()
         self.stage = self.detect_game_stage()
+        self.heuristic_value = self.calculate_heuristic()
 
     def detect_game_stage(self):
         """Xác định giai đoạn trận cờ dựa trên số quân cờ."""
@@ -40,19 +53,48 @@ class MCTSNode:
 
     def calculate_heuristic(self):
         """
-        Tính giá trị heuristic dựa trên thế cờ.
+        Tính giá trị heuristic dựa trên thế cờ, tùy thuộc vào giai đoạn.
 
         Returns:
-            float: Giá trị heuristic (thưởng bảo vệ, phạt đe dọa).
+            float: Giá trị heuristic.
         """
         heuristic = 0
+        center_squares = [chess.D4, chess.D5, chess.E4, chess.E5]
+        king_safety_squares = [
+            chess.F2, chess.G2, chess.H2, chess.F3, chess.G3, chess.H3,
+            chess.F6, chess.G6, chess.H6, chess.F7, chess.G7, chess.H7
+        ]
+        pawn_structure_squares = [chess.D2, chess.E2, chess.F2, chess.D7, chess.E7, chess.F7]
+
+        piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
         for square in chess.SQUARES:
             piece = self.board.piece_at(square)
-            if piece and piece.color == self.board.turn:
+            if piece:
+                value = piece_values[piece.piece_type]
+                heuristic += value if piece.color == self.board.turn else -value
+
+        # Heuristic cụ thể theo giai đoạn
+        if self.stage == "opening":
+            for square in center_squares:
                 if self.board.is_attacked_by(self.board.turn, square):
-                    heuristic += 0.1
-            if self.board.is_attacked_by(not self.board.turn, square):
-                heuristic -= 0.05
+                    heuristic += 0.2
+                if self.board.is_attacked_by(not self.board.turn, square):
+                    heuristic -= 0.1
+        elif self.stage == "middlegame":
+            legal_moves = len(list(self.board.legal_moves))
+            heuristic += legal_moves * 0.05
+            for square in king_safety_squares:
+                if self.board.is_attacked_by(self.board.turn, square):
+                    heuristic += 0.15
+        else:  # endgame
+            king = self.board.king(self.board.turn)
+            if king in king_safety_squares:
+                heuristic += 0.3
+            for square in pawn_structure_squares:
+                piece = self.board.piece_at(square)
+                if piece and piece.piece_type == chess.PAWN and piece.color == self.board.turn:
+                    heuristic += 0.2
+
         return heuristic
 
     def is_fully_expanded(self):
@@ -70,7 +112,7 @@ class MCTSNode:
         Chọn nút con tốt nhất dựa trên UCT và heuristic.
 
         Args:
-            exploration_weight (float): Hệ số khám phá (mặc định 1.0).
+            exploration_weight (float): Hệ số khám phá.
 
         Returns:
             MCTSNode: Nút con tốt nhất hoặc None nếu không có con.
@@ -78,19 +120,14 @@ class MCTSNode:
         if not self.children:
             return self
 
-        # Điều chỉnh trọng số heuristic theo giai đoạn
-        if self.stage == "opening":
-            heuristic_weight = 0.1
-        elif self.stage == "middlegame":
-            heuristic_weight = 0.2
-        else:  # endgame
-            heuristic_weight = 0.3
+        # Heuristic weight dành riêng cho giai đoạn
+        heuristic_weight = {"opening": 0.1, "middlegame": 0.2, "endgame": 0.3}[self.stage]
 
         weights = {}
         for move, child in self.children.items():
             uct_value = (child.total_value / (child.visit_count + 1e-6))
             exploration_value = exploration_weight * child.prior * (
-                        (self.visit_count + 1e-6) ** 0.5 / (1 + child.visit_count))
+                (self.visit_count + 1e-6) ** 0.5 / (1 + child.visit_count))
             heuristic_value = heuristic_weight * child.heuristic_value
             weights[move] = uct_value + exploration_value + heuristic_value
 
@@ -115,7 +152,7 @@ def mcts_rollout(model, root, cache=None):
 
     # Giai đoạn Selection
     while not node.board.is_game_over() and node.is_fully_expanded():
-        node = node.best_child()
+        node = node.best_child(exploration_weight={"opening": 1.0, "middlegame": 0.8, "endgame": 0.5}[node.stage])
         path.append(node)
 
     # Giai đoạn Expansion
@@ -128,9 +165,9 @@ def mcts_rollout(model, root, cache=None):
         if not unvisited_moves:
             return
 
-        # Batch processing nếu có nhiều moves
-        if len(unvisited_moves) >= 3:  # Threshold cho batch processing
-            # Tạo tất cả new boards
+        # Xử lý hàng loạt cho Effective
+        batch_threshold = 4 if node.stage == "endgame" else 2
+        if len(unvisited_moves) >= batch_threshold:
             new_boards = []
             new_nodes_info = []
 
@@ -141,23 +178,18 @@ def mcts_rollout(model, root, cache=None):
                 new_boards.append(new_board)
                 new_nodes_info.append((move, new_node))
 
-            # Batch inference
             policies, values = batch_model_call(model, new_boards)
 
-            # Process batch results
             for i, (move, new_node) in enumerate(new_nodes_info):
                 policy_probs = torch.softmax(policies[i:i + 1], dim=1)
                 move_index = move_to_index(move)
                 new_node.prior = policy_probs[0][move_index].item()
                 node.children[move] = new_node
         else:
-            # Individual inference cho ít moves
             for move in unvisited_moves:
                 new_board = node.board.copy()
                 new_board.push(move)
                 new_node = MCTSNode(new_board, parent=node, move=move)
-
-                # Cached model call
                 policy, value = cached_model_call(model, new_board)
                 move_index = move_to_index(move)
                 policy_probs = torch.softmax(policy, dim=1)
@@ -169,7 +201,7 @@ def mcts_rollout(model, root, cache=None):
             best_child = max(node.children.values(), key=lambda x: x.prior)
             node = best_child
 
-    # Giai đoạn Simulation - sử dụng cached model call
+    # Giai đoạn Simulation
     _, value = cached_model_call(model, node.board)
     value = value.item()
 
@@ -203,16 +235,22 @@ def get_best_move(model, board, mcts_iterations=100, temperature=1.0):
 
     root = MCTSNode(board)
 
+    # Các lần lặp MCT động dựa trên giai đoạn và độ phức tạp
+    legal_moves_count = len(list(board.legal_moves))
+    piece_count = len(board.piece_map())
+    stage = root.stage
+    if stage == "opening":
+        mcts_iterations = min(50, mcts_iterations)
+    elif stage == "middlegame":
+        mcts_iterations = int(mcts_iterations * (1 + legal_moves_count / 20))
+    else:  # endgame
+        mcts_iterations = min(300, mcts_iterations * 2)
+
     # Warm-up model
     _ = cached_model_call(model, board)
 
-    # MCTS iterations với progress tracking tối giản
-    for i in range(mcts_iterations):
+    for _ in range(mcts_iterations):
         mcts_rollout(model, root)
-
-        # Chỉ log mỗi 25% để tránh overhead
-        if i > 0 and i % max(1, mcts_iterations // 4) == 0:
-            pass  # Có thể thêm log tối giản nếu cần
 
     if not root.children:
         return None
@@ -223,28 +261,23 @@ def get_best_move(model, board, mcts_iterations=100, temperature=1.0):
     for move, child in root.children.items():
         move_probs[move] = child.visit_count / total_visits
 
-    # Áp dụng nhiệt độ để điều chỉnh độ ngẫu nhiên
+    # Áp dụng nhiệt độ
     if temperature > 0:
         moves_list = list(move_probs.keys())
         probs_list = [move_probs[move] for move in moves_list]
-
-        # Chuyển sang dạng log để tránh underflow
         log_probs = np.log([prob + 1e-10 for prob in probs_list])
         scaled_log_probs = log_probs / temperature
         exp_probs = np.exp(scaled_log_probs - np.max(scaled_log_probs))
         exp_probs /= exp_probs.sum()
-
-        # Cập nhật lại xác suất
         move_probs = dict(zip(moves_list, exp_probs))
 
-    # Chọn nước đi tốt nhất
     best_move = max(move_probs, key=move_probs.get)
     return best_move
 
 
 def get_board_cache_key(board):
     """
-    Tạo cache key hiệu quả cho board
+    Tạo cache key hiệu quả cho board bằng Zobrist hashing.
 
     Args:
         board (chess.Board): Trạng thái bàn cờ hiện tại.
@@ -252,22 +285,30 @@ def get_board_cache_key(board):
     Returns:
         int: Mã cache key.
     """
-    # Dùng hash nhanh hơn string FEN
-    piece_map = tuple(sorted(board.piece_map().items()))
-    turn = board.turn
-    castling = (
-        board.has_kingside_castling_rights(True),
-        board.has_queenside_castling_rights(True),
-        board.has_kingside_castling_rights(False),
-        board.has_queenside_castling_rights(False)
-    )
-    en_passant = board.ep_square if board.ep_square else -1
-    return hash((piece_map, turn, castling, en_passant))
+    key = 0
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            piece_idx = piece.piece_type - 1 + (6 if piece.color == chess.BLACK else 0)
+            key ^= ZOBRIST_TABLE[piece_idx, square]
+    if board.turn == chess.BLACK:
+        key ^= ZOBRIST_TURN
+    for i, castling in enumerate([
+        board.has_kingside_castling_rights(chess.WHITE),
+        board.has_queenside_castling_rights(chess.WHITE),
+        board.has_kingside_castling_rights(chess.BLACK),
+        board.has_queenside_castling_rights(chess.BLACK)
+    ]):
+        if castling:
+            key ^= ZOBRIST_CASTLING[i]
+    if board.ep_square:
+        key ^= ZOBRIST_EN_PASSANT[chess.square_file(board.ep_square)]
+    return key
 
 
 def cached_model_call(model, board):
     """
-    Gọi model với caching hiệu quả
+    Gọi model với caching hiệu quả.
 
     Args:
         model: The AI model (ChessNet).
@@ -277,26 +318,19 @@ def cached_model_call(model, board):
         tuple: Policy and value from the model.
     """
     cache_key = get_board_cache_key(board)
-
-    # Kiểm tra bộ nhớ cache
     if cache_key in GLOBAL_CACHE:
-        # Di chuyển đến kết thúc (LRU)
         result = GLOBAL_CACHE.pop(cache_key)
         GLOBAL_CACHE[cache_key] = result
         return result
 
-    # Tính kết quả mới
     encoded = encode_board(board).unsqueeze(0).to(DEVICE, dtype=torch.float32)
     with torch.no_grad():
         policy, value, _ = model(encoded)
 
     result = (policy, value)
-
-    # Thêm vào bộ đệm với giới hạn kích thước
     if len(GLOBAL_CACHE) >= CACHE_SIZE_LIMIT:
         GLOBAL_CACHE.popitem(last=False)
     GLOBAL_CACHE[cache_key] = result
-
     return result
 
 
@@ -312,19 +346,10 @@ def batch_model_call(model, boards_list):
         tuple: Chính sách và giá trị cho lô bảng.
     """
     if not boards_list:
-        return []
+        return [], []
 
-    # Mã hóa tất cả các bảng
-    encoded_list = []
-    for board in boards_list:
-        encoded = encode_board(board)
-        encoded_list.append(encoded)
-
-    # Xếp chồng vào tenor
+    encoded_list = [encode_board(board) for board in boards_list]
     batch_tensor = torch.stack(encoded_list).to(DEVICE, dtype=torch.float32)
-
-    # Suy luận hàng loạt
     with torch.no_grad():
         policies, values, _ = model(batch_tensor)
-
     return policies, values

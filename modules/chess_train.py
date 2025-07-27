@@ -34,6 +34,7 @@ def get_game_result(pgn_game: chess.pgn.Game) -> float:
         return 0.0
     return 0.0
 
+
 def evaluate_position(engine: chess.engine.SimpleEngine, board: chess.Board) -> float:
     """
     Đánh giá trạng thái bàn cờ bằng Stockfish.
@@ -43,19 +44,20 @@ def evaluate_position(engine: chess.engine.SimpleEngine, board: chess.Board) -> 
         board (chess.Board): Trạng thái bàn cờ hiện tại.
 
     Returns:
-        float: Giá trị bàn cờ trong khoảng [-1, 1], dựa trên điểm centipawns.
+        float: Giá trị bàn cờ trong khoảng [-1, 1].
     """
     try:
         info = engine.analyse(board, chess.engine.Limit(time=0.1))
         score = info["score"].relative.score(mate_score=10000) / 100.0
-        return max(min(score / 10.0, 1.0), -1.0)  # Chuẩn hóa về [-1, 1]
+        return max(min(score / 10.0, 1.0), -1.0)
     except Exception as e:
         LOGGER.warning(f"Lỗi khi đánh giá vị trí: {e}")
         return 0.0
 
+
 def propagate_values(values: List[float], gamma: float = 0.99) -> List[float]:
     """
-    Lan truyền ngược giá trị với hệ số giảm để gán giá trị cho các trạng thái trước.
+    Lan truyền ngược giá trị với hệ số giảm.
 
     Args:
         values (List[float]): Danh sách giá trị của các trạng thái.
@@ -69,6 +71,7 @@ def propagate_values(values: List[float], gamma: float = 0.99) -> List[float]:
         propagated[i] = gamma * propagated[i + 1]
     return propagated
 
+
 def augment_board(board: chess.Board) -> List[Tuple[chess.Board, callable]]:
     """
     Tăng cường dữ liệu bằng cách lật dọc và xoay 180 độ bàn cờ.
@@ -79,26 +82,25 @@ def augment_board(board: chess.Board) -> List[Tuple[chess.Board, callable]]:
     Returns:
         List[Tuple[chess.Board, callable]]: Danh sách các bàn cờ tăng cường và hàm biến đổi nước đi.
     """
-    augmented = [(board, lambda m: m)]  # Bàn cờ gốc, không biến đổi nước đi
-    # Lật dọc
+    augmented = [(board, lambda m: m)]
     flipped = board.copy()
     flipped.apply_transform(chess.flip_vertical)
     augmented.append((flipped, lambda move: flip_vertical(move)))
-    # Xoay 180 độ
     rotated = board.copy()
     rotated.apply_transform(chess.flip_vertical)
     rotated.apply_transform(chess.flip_horizontal)
     augmented.append((rotated, lambda move: flip_horizontal(flip_vertical(move))))
     return augmented
 
+
 def get_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, top_k: int = 1) -> List[chess.Move]:
     """
-    Lấy top k nước đi tốt nhất từ Stockfish cho trạng thái bàn cờ.
+    Lấy top k nước đi tốt nhất từ Stockfish.
 
     Args:
         engine (chess.engine.SimpleEngine): Engine Stockfish.
         board (chess.Board): Trạng thái bàn cờ hiện tại.
-        top_k (int): Số lượng nước đi tốt nhất cần lấy (mặc định 1).
+        top_k (int): Số lượng nước đi tốt nhất cần lấy.
 
     Returns:
         List[chess.Move]: Danh sách các nước đi tốt nhất.
@@ -110,57 +112,69 @@ def get_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, top_k: 
         LOGGER.warning(f"Lỗi khi lấy top moves: {e}")
         return list(board.legal_moves)[:top_k]
 
+
 class ChessDataset:
     """
     Dataset cho dữ liệu cờ vua từ các file PGN, hỗ trợ tăng cường dữ liệu và đánh giá Stockfish.
     """
-    def __init__(self):
+    def __init__(self, preprocess=False):
         """
-        Khởi tạo dataset từ thư mục chứa file PGN.
+        Khởi tạo dataset từ thư mục chứa file PG 애드.
+
+        Args:
+            preprocess (bool): Nếu True, thực hiện tiền xử lý và tạo mới file preprocessed.pt.
         """
         self.games = []
         self.data = []
         self.stage_info = {"opening": 0, "middlegame": 0, "endgame": 0}
-        preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
+        self.preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
 
-        if os.path.exists(preprocessed_path):
-            self.data = torch.load(preprocessed_path, weights_only=False)
-            LOGGER.info(f"Đã tải dữ liệu tiền xử lý từ {preprocessed_path}")
+        if not preprocess and os.path.exists(self.preprocessed_path):
+            self.data = torch.load(self.preprocessed_path, weights_only=False)
+            LOGGER.info(f"Đã tải dữ liệu tiền xử lý từ {self.preprocessed_path}")
             return
 
         if not os.path.exists(DATA_PATH):
             LOGGER.error(f"Thư mục '{DATA_PATH}' không tồn tại.")
             return
 
+        self.load_pgn_files()
+        if preprocess:
+            self.preprocess_data()
+
+    def load_pgn_files(self):
+        """
+        Đọc các file PGN từ thư mục DATA_PATH.
+        """
         pgn_files = [f for f in os.listdir(DATA_PATH) if f.endswith(".pgn")]
         LOGGER.info(f"Tìm thấy {len(pgn_files)} file PGN: {pgn_files}")
 
-        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH, debug=False)
         for filename in tqdm(pgn_files, desc="Đang đọc PGN files", total=len(pgn_files)):
             file_path = os.path.join(DATA_PATH, filename)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    game_count = 0
                     while True:
                         game = chess.pgn.read_game(f)
                         if game is None:
                             break
                         self.games.append(game)
-                        game_count += 1
             except Exception as e:
                 LOGGER.error(f"Lỗi khi đọc {filename}: {e}")
 
-        self.preprocess_and_save(preprocessed_path, engine)
-        engine.quit()
-
-    def preprocess_and_save(self, save_path: str, engine: chess.engine.SimpleEngine):
+    def preprocess_data(self):
         """
         Tiền xử lý dữ liệu PGN, bao gồm đánh giá Stockfish, tăng cường dữ liệu, và lưu vào file.
-
-        Args:
-            save_path (str): Đường dẫn để lưu dữ liệu tiền xử lý.
-            engine (chess.engine.SimpleEngine): Engine Stockfish.
         """
+        if os.path.exists(self.preprocessed_path):
+            overwrite = input(f"Tệp {self.preprocessed_path} đã tồn tại. Bạn có muốn xóa và tạo mới? (y/n): ").strip().lower()
+            if overwrite != 'y':
+                LOGGER.info("Hủy quá trình tiền xử lý do người dùng chọn giữ file cũ.")
+                return
+            else:
+                os.remove(self.preprocessed_path)
+                LOGGER.info(f"Đã xóa tệp {self.preprocessed_path}")
+
+        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH, debug=False)
         processed_data = []
         total_moves = 0
 
@@ -171,7 +185,6 @@ class ChessDataset:
             moves = []
 
             for move in game.mainline_moves():
-                # Lọc nước đi không nằm trong top 1 của Stockfish
                 top_moves = get_top_moves(engine, board, top_k=1)
                 if move not in top_moves:
                     board.push(move)
@@ -185,14 +198,12 @@ class ChessDataset:
             values.append(final_value)
             values = propagate_values(values)
 
-            # Tạo dữ liệu từ các trạng thái
             board = game.board()
             for i, move in enumerate(moves):
                 piece_count = len(board.piece_map())
                 stage = 0 if piece_count > 30 else 1 if piece_count > 15 else 2
                 self.stage_info["opening" if stage == 0 else "middlegame" if stage == 1 else "endgame"] += 1
 
-                # Tăng cường dữ liệu
                 augmented_boards = augment_board(board)
                 for aug_board, transform in augmented_boards:
                     aug_move = transform(move) if transform else move
@@ -208,9 +219,10 @@ class ChessDataset:
                 else:
                     continue
 
-        torch.save(processed_data, save_path)
-        LOGGER.info(f"Đã lưu dữ liệu tiền xử lý vào {save_path}")
+        torch.save(processed_data, self.preprocessed_path)
+        LOGGER.info(f"Đã lưu dữ liệu tiền xử lý vào {self.preprocessed_path}")
         self.data = processed_data
+        engine.quit()
 
     def __len__(self) -> int:
         """
@@ -234,6 +246,7 @@ class ChessDataset:
         """
         tensor, move_idx, value, stage_onehot = self.data[idx]
         return tensor, torch.tensor(move_idx, dtype=torch.long), torch.tensor(value, dtype=torch.float32), stage_onehot
+
 
 def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
     """
@@ -270,6 +283,7 @@ def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
                     board.push(move)
 
     return stage_counts, total_moves
+
 
 def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
                batch_size: int = 256, tolerance: float = 1e-4, patience: int = 3) -> None:
@@ -360,35 +374,62 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     torch.save(ai_model.state_dict(), model_path)
     LOGGER.info(f"Đã lưu mô hình tại {model_path}")
 
-def run_train(selected_model_path):
+
+def run_train(selected_model_path=None):
     """
     Chương trình học AI.
 
     Args:
-        selected_model_path (str): Đường dạng file .pth của mô hình chọn.
+        selected_model_path (str): Đường dẫn file .pth của mô hình chọn.
     """
-    preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
-    if os.path.exists(preprocessed_path):
-        use_preprocessed = input("Tập tin preprocessed.pt đã tồn tại. Bạn có muốn sử dụng nó để huấn luyện không? (y/n): ").strip().lower()
-        if use_preprocessed != 'y':
-            os.remove(preprocessed_path)
-            LOGGER.info(f"Đã xóa tập tin preprocessed.pt cũ.")
-    global ai_model
-    if selected_model_path and os.path.exists(selected_model_path):
-        ai_model = load_model(selected_model_path)
-    else:
-        ai_model = ChessNet().to(DEVICE)
-        LOGGER.info("Không chọn mô hình. Khởi tạo mô hình mới.")
-
-    optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
-    start_time = time.time()
-
-    # Kiểm tra và tạo thư mục data nếu chưa tồn tại
     if not os.path.exists(DATA_PATH):
         os.makedirs(DATA_PATH)
         LOGGER.info(f"Đã tạo thư mục '{DATA_PATH}'")
 
-    train_with(ai_model, optimizer)
+    # Khởi tạo mô hình
+    if selected_model_path and os.path.exists(selected_model_path):
+        ai_model = load_model(selected_model_path)
+        LOGGER.info(f"Tải mô hình từ {selected_model_path}")
+    else:
+        ai_model = ChessNet().to(DEVICE)
+        LOGGER.info("Không chọn mô hình. Khởi tạo mô hình mới.")
 
-    elapsed_time = time.time() - start_time
-    LOGGER.info(f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")
+    while True:
+        print("\nChọn chế độ:")
+        print("1. Tiền xử lý dữ liệu với Stockfish")
+        print("2. Huấn luyện mô hình")
+        print("3. Cả hai")
+        print("0. Thoát")
+        choice = input("Nhập lựa chọn của bạn: ").strip()
+
+        if choice == "1":
+            mode = "preprocess"
+            break
+        elif choice == "2":
+            mode = "train"
+            break
+        elif choice == "3":
+            mode = "both"
+            break
+        elif choice == "0":
+            print("Thoát chương trình.")
+            return
+        else:
+            print("Lựa chọn không hợp lệ. Vui lòng chọn lại.")
+
+    optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
+    start_time = time.time()
+
+    if mode in ["preprocess", "both"]:
+        dataset = ChessDataset(preprocess=True)
+        if len(dataset) == 0:
+            LOGGER.error("Không thể tạo dữ liệu tiền xử lý. Thoát chương trình.")
+            return
+        if mode == "preprocess":
+            LOGGER.info("Đã hoàn tất tiền xử lý dữ liệu.")
+            return
+
+    if mode in ["train", "both"]:
+        train_with(ai_model, optimizer)
+        elapsed_time = time.time() - start_time
+        LOGGER.info(f"Thời gian hoàn tất: {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}")

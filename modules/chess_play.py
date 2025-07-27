@@ -45,12 +45,10 @@ def play_game(ai_model, human_color=chess.WHITE):
     print(board)
 
     while not board.is_game_over():
-        # Hiển thị giai đoạn hiện tại
         stage = detect_game_stage(board)
         print(f"Giai đoạn hiện tại: {stage}")
 
         if board.turn == human_color:
-            # Lượt của người chơi
             print("\nNước đi của bạn (ví dụ: 'e2e4' hoặc 'Nf3'):")
             while True:
                 try:
@@ -74,15 +72,9 @@ def play_game(ai_model, human_color=chess.WHITE):
                 except ValueError:
                     print("Định dạng nước đi không hợp lệ. Sử dụng ký hiệu SAN (ví dụ: 'e2e4' hoặc 'Nf3').")
         else:
-            # Lượt của AI
             print("\nAI đang suy nghĩ...")
             print(f"Trạng thái bàn cờ hiện tại: {board.fen()}")
-            # Điều chỉnh số lần lặp MCTS theo giai đoạn
-            stage = detect_game_stage(board)
-            if stage == "Tàn cuộc":
-                move = get_best_move(ai_model, board, mcts_iterations=200, temperature=0.5)
-            else:
-                move = get_best_move(ai_model, board, mcts_iterations=100, temperature=1.0)
+            move = get_best_move(ai_model, board)
             if move is None:
                 print("AI không tìm thấy nước đi hợp lệ. Kết thúc ván.")
                 game.headers["Result"] = "*"
@@ -95,7 +87,7 @@ def play_game(ai_model, human_color=chess.WHITE):
             move_san = board.san(move)
             print(f"Nước đi của AI: {move_san} (UCI: {move.uci()})")
             board.push(move)
-            node = node.add_variation(move)  # Thêm nước đi của AI vào game node
+            node = node.add_variation(move)
 
         print("\nVị trí hiện tại:")
         print(board)
@@ -145,12 +137,7 @@ def self_play(ai_model, num_games=100):
             node = game
 
             while not board.is_game_over():
-                # Điều chỉnh số lần lặp MCTS theo giai đoạn
-                stage = detect_game_stage(board)
-                if stage == "Tàn cuộc":
-                    move = get_best_move(ai_model, board, mcts_iterations=200, temperature=0.5)
-                else:
-                    move = get_best_move(ai_model, board, mcts_iterations=100, temperature=1.0)
+                move = get_best_move(ai_model, board)
                 if move is None:
                     print("Không tìm thấy nước đi hợp lệ. Kết thúc ván.")
                     break
@@ -175,7 +162,6 @@ def run_play(selected_model_path=None):
     Args:
         selected_model_path (str): Đường dẫn file .pth của mô hình chọn, nếu có.
     """
-    # Nếu không có mô hình được chọn hoặc mô hình không tồn tại, khởi tạo mô hình mới
     if not selected_model_path or not os.path.exists(selected_model_path):
         print("Không tìm thấy mô hình đã huấn luyện. Khởi tạo mô hình ChessNet mới với trọng số ngẫu nhiên.")
         ai_model = ChessNet().to(DEVICE)

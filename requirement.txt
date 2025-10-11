@@ -1,7 +1,0 @@
-torch==2.7.1 --index-url https://download.pytorch.org/whl/rocm6.3
-torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/rocm6.3
-torchvision==0.22.1 --index-url https://download.pytorch.org/whl/rocm6.3
-chess==1.11.2
-colorlog==6.9.0
-requests==2.32.4
-tqdm==4.67.1

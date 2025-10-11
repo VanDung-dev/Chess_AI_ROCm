@@ -20,8 +20,8 @@ Dự án được phát triển với mục tiêu mô phỏng khả năng tư du
 Dự án này được xây dựng và thử nghiệm trên hệ thống có cấu hình phần cứng sau:
 
 - GPU: **AMD Radeon™ RX 7600S**
-- Framework: **ROCm 6.3**
-- Thư viện học sâu: **PyTorch 2.7.1+rocm**
+- Framework: **ROCm 6.4**
+- Thư viện học sâu: **PyTorch 2.8.0+rocm6.4**
 
 Tuy nhiên, mã nguồn **không phụ thuộc vào phần cứng cụ thể**. Người dùng hoàn toàn có thể triển khai dự án này trên các hệ thống sử dụng **GPU NVIDIA với CUDA**, hoặc CPU nếu cần thiết (tốc độ sẽ chậm hơn).
 
@@ -31,7 +31,7 @@ Tuy nhiên, mã nguồn **không phụ thuộc vào phần cứng cụ thể**. 
 
 - Python 3.12 trở lên
 - PyTorch (phiên bản phù hợp với phần cứng):
-  - Với GPU AMD: `torch==2.7.1+rocm6.3`
+  - Với GPU AMD: `torch==2.8.0+rocm6.4`
   - Với GPU NVIDIA: `torch>=2.1.0` (CUDA 11.8/12.1 tùy môi trường)
 - Các thư viện phụ thuộc:
   - `python-chess`

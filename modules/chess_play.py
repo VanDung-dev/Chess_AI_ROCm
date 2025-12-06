@@ -84,7 +84,7 @@ def play_game(ai_model, human_color=chess.WHITE):
                     pgn_file.write("\n\n")
                 print(f"Ván cờ đã được lưu vào {pgn_file_path}")
                 return
-            # print(f"Nước đi của AI: {board.san(move)} (UCI: {move.uci()})")
+            print(f"Nước đi của AI: {board.san(move)} (UCI: {move.uci()})")
             board.push(move)
             node = node.add_variation(move)
 
@@ -140,8 +140,7 @@ def self_play(ai_model, num_games=100):
                 if move is None:
                     print("Không tìm thấy nước đi hợp lệ. Kết thúc ván.")
                     break
-                move_san = board.san(move)
-                print(f"Nước đi của AI: {move_san} (UCI: {move.uci()})")
+                # print(f"Nước đi của AI: {board.san(move)} (UCI: {move.uci()})")
                 board.push(move)
                 node = node.add_variation(move)
 

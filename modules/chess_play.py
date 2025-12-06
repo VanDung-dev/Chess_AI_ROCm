@@ -84,8 +84,7 @@ def play_game(ai_model, human_color=chess.WHITE):
                     pgn_file.write("\n\n")
                 print(f"Ván cờ đã được lưu vào {pgn_file_path}")
                 return
-            move_san = board.san(move)
-            print(f"Nước đi của AI: {move_san} (UCI: {move.uci()})")
+            # print(f"Nước đi của AI: {board.san(move)} (UCI: {move.uci()})")
             board.push(move)
             node = node.add_variation(move)
 

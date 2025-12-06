@@ -32,14 +32,36 @@ impl MCTSNode {
 
 #[pyfunction]
 fn mcts_loop(
-    _py: Python,
     fen: &str,
     iterations: usize,
+    priors: Vec<(String, f32)>,
+    root_value: f32,
 ) -> PyResult<Vec<(String, f32, u32)>> {
     let board = Board::from_str(fen).map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid FEN: {}", e)))?;
     
     let mut nodes: Vec<MCTSNode> = vec![MCTSNode::new(board, None, None)];
     let root_idx = 0;
+    
+    // Set root value
+    nodes[root_idx].total_value = root_value;
+    
+    // Set priors for moves
+    let moves: Vec<_> = MoveGen::new_legal(&board).collect();
+    for (move_str, prior) in priors {
+        if let Ok(chess_move) = move_str.parse::<ChessMove>() {
+            if moves.contains(&chess_move) {
+                let mut new_board = board;
+                new_board = new_board.make_move_new(chess_move);
+                
+                let new_node_idx = nodes.len();
+                let mut new_node = MCTSNode::new(new_board, Some(root_idx), Some(chess_move));
+                new_node.prior = prior;
+                nodes.push(new_node);
+                
+                nodes[root_idx].children.insert(chess_move, new_node_idx);
+            }
+        }
+    }
     
     // Chạy các lần lặp lại MCTS
     for _ in 0..iterations {
@@ -100,28 +122,35 @@ fn mcts_iteration(root_idx: usize, nodes: &mut Vec<MCTSNode>) {
             .collect();
         
         if !unvisited_moves.is_empty() {
-            // Chọn một nước đi ngẫu nhiên chưa được truy cập
-            let mut rng = rand::rng();
-            let selected_move = unvisited_moves[rng.random_range(0..unvisited_moves.len())];
+            // Mở rộng các node mới với prior từ model
+            for selected_move in unvisited_moves {
+                // Tạo trạng thái bảng mới
+                let mut new_board = nodes[current_idx].board;
+                new_board = new_board.make_move_new(selected_move);
+                
+                // Tạo nút mới
+                let new_node_idx = nodes.len();
+                let new_node = MCTSNode::new(new_board, Some(current_idx), Some(selected_move));
+                
+                // Use default prior for now (will be set externally)
+                nodes.push(new_node);
+                
+                // Thêm child vào parent
+                nodes[current_idx].children.insert(selected_move, new_node_idx);
+            }
             
-            // Tạo trạng thái bảng mới
-            let mut new_board = nodes[current_idx].board;
-            new_board = new_board.make_move_new(selected_move);
-            
-            // Tạo nút mới
-            let new_node_idx = nodes.len();
-            let new_node = MCTSNode::new(new_board, Some(current_idx), Some(selected_move));
-            nodes.push(new_node);
-            
-            // Thêm child vào parent
-            nodes[current_idx].children.insert(selected_move, new_node_idx);
-            
-            current_idx = new_node_idx;
+            // Chọn node con ngẫu nhiên
+            if !nodes[current_idx].children.is_empty() {
+                let mut rng = rand::rng();
+                let children_keys: Vec<_> = nodes[current_idx].children.keys().cloned().collect();
+                let selected_move = children_keys[rng.random_range(0..children_keys.len())];
+                current_idx = nodes[current_idx].children[&selected_move];
+            }
         }
     }
     
-    // Giai đoạn mô phỏng (sử dụng random playout)
-    let value = simulate_random_playout(&nodes[current_idx].board);
+    // Giai đoạn đánh giá (sử dụng giá trị mặc định thay vì model)
+    let value = 0.0; // Will be set externally
     
     // Giai đoạn lan truyền ngược
     let mut node_idx = current_idx;
@@ -151,30 +180,6 @@ fn calculate_uct(parent_idx: usize, child_idx: usize, nodes: &[MCTSNode]) -> f32
         ((parent.visit_count as f32).ln() / (child.visit_count as f32)).sqrt();
     
     exploitation + exploration
-}
-
-fn simulate_random_playout(board: &Board) -> f32 {
-    let mut current_board = *board;
-    let mut rng = rand::rng();
-    
-    // Giới hạn độ sâu mô phỏng để ngăn chặn các ván game vô hạn
-    for _ in 0..200 {
-        if current_board.status() != BoardStatus::Ongoing {
-            break;
-        }
-        
-        let moves: Vec<_> = MoveGen::new_legal(&current_board).collect();
-        if moves.is_empty() {
-            break;
-        }
-        
-        let random_move = moves[rng.random_range(0..moves.len())];
-        current_board = current_board.make_move_new(random_move);
-    }
-    
-    // Đánh giá vị trí cuối cùng
-    // Đánh giá đơn giản cho hiện tại
-    0.0
 }
 
 /// Một mô-đun Python được triển khai trong Rust.

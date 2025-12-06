@@ -1,4 +1,7 @@
 import chess
+from modules.chess_mcts import cached_model_call
+from modules.chess_engine import move_to_index
+import torch
 import chess_mcts_rs
 
 
@@ -17,8 +20,25 @@ def get_best_move(model, board, mcts_iterations=1000, temperature=0.9):
     """
     try:
         fen = board.fen()
-        # Gọi triển khai Rust
-        results = chess_mcts_rs.mcts_loop(fen, mcts_iterations)
+        
+        # Get model evaluation for root position
+        policy, value = cached_model_call(model, board)
+        root_value = value.item()
+        
+        # Get priors for possible moves
+        legal_moves = list(board.legal_moves)
+        priors = []
+        
+        # Convert policy logits to probabilities
+        policy_probs = torch.softmax(policy, dim=1)
+        
+        for move in legal_moves:
+            move_idx = move_to_index(move)
+            move_prob = policy_probs[0][move_idx].item()
+            priors.append((move.uci(), move_prob))
+        
+        # Gọi triển khai Rust với model evaluation
+        results = chess_mcts_rs.mcts_loop(fen, mcts_iterations, priors, root_value)
         
         if not results:
             return None

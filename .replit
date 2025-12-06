@@ -1,0 +1,65 @@
+entrypoint = "main.py"
+modules = ["python-3.11", "rust-1.86"]
+
+[nix]
+channel = "stable-25_05"
+packages = ["libjpeg_turbo", "libpng", "which"]
+
+[unitTest]
+language = "python3"
+
+[gitHubImport]
+requiredFiles = [".replit", "replit.nix"]
+
+[deployment]
+run = ["python3", "main.py"]
+deploymentTarget = "cloudrun"
+
+[agent]
+expertMode = true
+
+[workflows]
+
+[[workflows.workflow]]
+name = "python main.py"
+mode = "sequential"
+author = 22402035
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+
+[[workflows.workflow]]
+name = "maturin build"
+mode = "sequential"
+author = 22402035
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "source .venv/bin/activate"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "maturin build"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install target/wheels/*.whl"
+
+[[workflows.workflow]]
+name = "rustc --version"
+mode = "sequential"
+author = 22402035
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "rustc --version"
+
+[[workflows.workflow]]
+name = "python3 -m venv .venv"
+mode = "sequential"
+author = 22402035
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 -m venv .venv"

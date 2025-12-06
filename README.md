@@ -39,6 +39,7 @@ Tuy nhiên, mã nguồn **không phụ thuộc vào phần cứng cụ thể**. 
   - `numpy`
   - `tqdm`
   - `torchvision` (nếu mở rộng)
+  - `maturin` (để build Rust extension)
 
 Cài đặt các thư viện bằng:
 
@@ -75,6 +76,7 @@ Các file dữ liệu sẽ được lưu vào thư mục `data/`, và mô hình 
 - Sử dụng heuristic đánh giá thế trận và giai đoạn (khai cuộc / trung cuộc / tàn cuộc).
 - Tự chơi để tạo thêm dữ liệu huấn luyện mà không cần người dùng can thiệp.
 - Ghi lại toàn bộ ván đấu dưới dạng PGN để phân tích và cải thiện.
+- Sử dụng Rust extension để tăng tốc độ MCTS.
 
 ---
 
@@ -89,6 +91,17 @@ python main.py  # chọn chế độ 1
 ```
 
 Mô hình sẽ được lưu tự động sau mỗi phiên huấn luyện thành công.
+
+---
+
+## Rust Extension
+
+Dự án sử dụng extension viết bằng Rust để tăng tốc độ của thuật toán MCTS. Để build và sử dụng extension này:
+
+1. Cài đặt Rust toolchain từ https://rustup.rs/
+2. Chạy lệnh build: `maturin develop`
+
+Hệ thống sẽ sử dụng phiên bản Rust trực tiếp thay vì phiên bản Python.
 
 ---
 

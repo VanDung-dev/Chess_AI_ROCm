@@ -2,7 +2,7 @@ import chess
 import os
 import time
 import chess.pgn
-from modules.chess_mcts import get_best_move
+from modules.chess_mcts_rs import get_best_move
 from modules.chess_model import load_model
 from modules.chess_config import DATA_PATH, DEVICE
 from modules.chess_neuron import ChessNet

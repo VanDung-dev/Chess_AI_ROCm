@@ -327,25 +327,26 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
     epoch = 0
 
     while True:
-        total_loss, total_policy_loss, total_value_loss, total_stage_loss = 0, 0, 0, 0
+        total_loss, total_policy_loss, total_value_loss = 0, 0, 0
         for i, (batch_states, batch_policies, batch_values, batch_stages) in enumerate(data_loader):
             batch_states = batch_states.to(DEVICE, dtype=torch.float32)
             batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
             batch_values = batch_values.to(DEVICE, dtype=torch.float32)
-            batch_stages = batch_stages.to(DEVICE, dtype=torch.float32)
+            # batch_stages is ignored
+            
             optimizer.zero_grad()
             try:
-                predicted_policies, predicted_values, predicted_stages = ai_model(batch_states)
+                predicted_policies, predicted_values = ai_model(batch_states)
                 policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
                 value_loss = torch.nn.functional.mse_loss(predicted_values.squeeze(-1), batch_values)
-                stage_loss = torch.nn.functional.cross_entropy(predicted_stages, batch_stages)
-                loss = policy_loss + value_loss + 0.5 * stage_loss
+                
+                loss = policy_loss + value_loss
                 loss.backward()
                 optimizer.step()
+                
                 total_loss += loss.item()
                 total_policy_loss += policy_loss.item()
                 total_value_loss += value_loss.item()
-                total_stage_loss += stage_loss.item()
             except Exception as e:
                 LOGGER.error(f"Lỗi trong batch {i + 1}: {e}")
                 raise
@@ -356,8 +357,7 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         epoch_log = (
             f"Epoch {epoch + 1}, Tổng Loss: {avg_loss:.4f}, "
             f"Policy Loss: {total_policy_loss / len(data_loader):.4f}, "
-            f"Value Loss: {total_value_loss / len(data_loader):.4f}, "
-            f"Stage Loss: {total_stage_loss / len(data_loader):.4f}"
+            f"Value Loss: {total_value_loss / len(data_loader):.4f}"
         )
         LOGGER.info(epoch_log)
 

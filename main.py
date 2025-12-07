@@ -9,6 +9,12 @@ from stockfish.download_stockfish import download_stockfish
 
 
 if __name__ == "__main__":
+    try:
+        import chess_rs
+    except ImportError:
+        print("Vui lòng cài đặt chess_rs trước khi chạy chương trình.")
+        exit(1)
+
     download_stockfish()
     ai_model = ChessNet().to(DEVICE)
     selected_model_path = list_and_select_model(MODEL_PATH)
@@ -62,4 +68,3 @@ if __name__ == "__main__":
             break
         else:
             print("Lựa chọn không hợp lệ. Vui lòng thử lại.")
-

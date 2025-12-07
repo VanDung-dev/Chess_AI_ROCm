@@ -15,15 +15,26 @@ PIECE_MAP = {
 
 COLOR_MAP = {chess.WHITE: 0, chess.BLACK: 6}
 
+# Giá trị quân cờ cơ bản (chuẩn hóa về khoảng [0, 1])
+PIECE_VALUES = {
+    None: 0.0,
+    chess.PAWN: 1.0/8.0,      # 1 điểm
+    chess.KNIGHT: 3.0/8.0,    # 3 điểm
+    chess.BISHOP: 3.0/8.0,    # 3 điểm
+    chess.ROOK: 5.0/8.0,      # 5 điểm
+    chess.QUEEN: 8.0/8.0,     # 8 điểm (giá trị cao nhất, = 1.0)
+    chess.KING: 0.0,          # Vua không có giá trị vật chất
+}
+
 
 def encode_board(board: chess.Board) -> torch.Tensor:
     """
-    Mã hóa bàn cờ thành tensor 24x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
+    Mã hóa bàn cờ thành tensor 27x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
 
     Returns:
         torch.Tensor: Tensor mã hóa bàn cờ.
     """
-    encoded = np.zeros((24, 8, 8), dtype=np.float32)
+    encoded = np.zeros((27, 8, 8), dtype=np.float32)
 
     # Mã hóa quân cờ
     for square in chess.SQUARES:
@@ -119,8 +130,7 @@ def encode_board(board: chess.Board) -> torch.Tensor:
             file_idx = chess.square_file(square)
             rank_idx = chess.square_rank(square)
             # Tăng giá trị dựa trên giá trị quân cờ (quân quan trọng hơn có giá trị cao hơn)
-            piece_value = {chess.PAWN: 0.2, chess.KNIGHT: 0.5, chess.BISHOP: 0.5, 
-                          chess.ROOK: 0.8, chess.QUEEN: 1.0, chess.KING: 0.0}[piece.piece_type]
+            piece_value = PIECE_VALUES[piece.piece_type]
             attacked_pieces[0, rank_idx, file_idx] = piece_value
     encoded[20, :, :] = attacked_pieces[0, :, :]
     
@@ -173,6 +183,54 @@ def encode_board(board: chess.Board) -> torch.Tensor:
                 # Tăng giá trị dựa trên số lượng quân bảo vệ
                 opponent_protected_pieces[0, rank_idx, file_idx] = min(len(protectors) * 0.3, 1.0)
     encoded[23, :, :] = opponent_protected_pieces[0, :, :]
+    
+    # Kênh cho các ô trống có thể bị phản công
+    vulnerable_squares = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        # Chỉ xem xét các ô trống
+        if not piece:
+            # Kiểm tra nếu ô này có thể bị tấn công bởi quân địch
+            if board.is_attacked_by(opponent_color, square):
+                file_idx = chess.square_file(square)
+                rank_idx = chess.square_rank(square)
+                # Tăng giá trị dựa trên số lượng quân địch có thể tấn công ô này
+                attackers = list(board.attackers(opponent_color, square))
+                vulnerable_squares[0, rank_idx, file_idx] = min(len(attackers) * 0.3, 1.0)
+    encoded[24, :, :] = vulnerable_squares[0, :, :]
+    
+    # Kênh cho giá trị quân cờ
+    piece_values = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            # Giá trị dương cho quân mình, âm cho quân địch
+            value = PIECE_VALUES[piece.piece_type]
+            if piece.color != self_color:
+                value = -value
+            piece_values[0, rank_idx, file_idx] = value
+    encoded[25, :, :] = piece_values[0, :, :]
+    
+    # Kênh cho tình trạng vua
+    king_safety = np.zeros((1, 8, 8), dtype=np.float32)
+    king_square = board.king(self_color)
+    if king_square:
+        # Kiểm tra xem vua có bị chiếu không
+        if board.is_check():
+            file_idx = chess.square_file(king_square)
+            rank_idx = chess.square_rank(king_square)
+            king_safety[0, rank_idx, file_idx] = -1.0  # Vua bị chiếu, rất nguy hiểm
+            
+        # Kiểm tra số lượng attacker đến vua
+        attackers = list(board.attackers(opponent_color, king_square))
+        if attackers:
+            file_idx = chess.square_file(king_square)
+            rank_idx = chess.square_rank(king_square)
+            # Giá trị âm càng lớn (về phía -1) khi càng nhiều quân tấn công vua
+            king_safety[0, rank_idx, file_idx] = -min(len(attackers) * 0.3, 1.0)
+    encoded[26, :, :] = king_safety[0, :, :]
 
     return torch.from_numpy(encoded)
 

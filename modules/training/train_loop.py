@@ -4,7 +4,7 @@ import torch
 import glob
 from modules.game.self_play import self_play_worker
 from modules.training.trainer import train_on_data, ChessNet
-from modules.model.model import load_model
+from modules.model.neuron import load_model
 from modules.config.config import MODEL_PATH, DATA_PATH
 
 

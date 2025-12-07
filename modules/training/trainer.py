@@ -11,7 +11,7 @@ from tqdm import tqdm
 from typing import List, Tuple, Any
 from modules.model.neuron import ChessNet
 from modules.model.encoding import encode_board, move_to_index, flip_vertical, flip_horizontal
-from modules.model.model import load_model
+from modules.model.neuron import load_model
 from modules.config.config import STOCKFISH_PATH, DATA_PATH, MODEL_PATH, DEVICE, LOGGER
 
 
@@ -356,9 +356,9 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
             batch_states = batch_states.to(DEVICE, dtype=torch.float32)
             # batch_policies có thể là Long (index) hoặc Float (probs) tùy thuộc vào tập dữ liệu
             if batch_policies.dtype == torch.float32:
-                 batch_policies = batch_policies.to(DEVICE, dtype=torch.float32)
+                batch_policies = batch_policies.to(DEVICE, dtype=torch.float32)
             else:
-                 batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
+                batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
                  
             batch_values = batch_values.to(DEVICE, dtype=torch.float32)
             # batch_stages is ignored
@@ -369,10 +369,10 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
                 
                 # Check target type for loss
                 if batch_policies.dim() > 1 and batch_policies.dtype == torch.float32:
-                     policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
+                    policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
                 else:
-                     policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
-                     
+                    policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
+
                 value_loss = torch.nn.functional.mse_loss(predicted_values.squeeze(-1), batch_values)
                 
                 loss = policy_loss + value_loss

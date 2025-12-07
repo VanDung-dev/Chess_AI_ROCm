@@ -1,8 +1,10 @@
 import chess
-from modules.chess_mcts_old import cached_model_call
-from modules.model.encoding import move_to_index
 import torch
 import chess_rs
+import numpy as np
+from modules.mcts_old import cached_model_call
+from modules.model.encoding import move_to_index
+
 
 class BoardEvaluator:
     def __init__(self, model):
@@ -31,7 +33,6 @@ class BoardEvaluator:
             print(f"Lỗi trong BoardEvaluator: {e}")
             return ([], 0.0)
 
-import numpy as np
 
 def run_mcts(model, board, mcts_iterations=800, temperature=1.0):
     """

@@ -1,9 +1,9 @@
 import os
 import torch
-from modules.model.neuron import ChessNet
-from modules.model.model import list_and_select_model
+from modules.model.neuron import list_and_select_model, ChessNet
 from modules.training.trainer import run_train
 from modules.game.player import run_play
+from modules.training.train_loop import train_loop
 from modules.config.config import DEVICE, MODEL_PATH
 from stockfish.download_stockfish import download_stockfish
 
@@ -53,16 +53,19 @@ if __name__ == "__main__":
     while True:
         print(
             "\nChọn chức năng:\n"
-            "1. Huấn luyện AI\n"
+            "1. Huấn luyện AI (Supervised)\n"
             "2. Chơi cờ với AI\n"
+            "3. Huấn luyện AlphaZero (Self-Play)\n"
             "0. Thoát chương trình"
         )
-        choose = input("Nhập lựa chọn của bạn (0/1/2): ").strip()
+        choose = input("Nhập lựa chọn của bạn (0/1/2/3): ").strip()
 
         if choose == "1":
             run_train(selected_model_path)
         elif choose == "2":
             run_play(selected_model_path)
+        elif choose == "3":
+            train_loop()
         elif choose == "0":
             print("Thoát chương trình.")
             break

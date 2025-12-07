@@ -325,7 +325,7 @@ def cached_model_call(model, board):
 
     encoded = encode_board(board).unsqueeze(0).to(DEVICE, dtype=torch.float32)
     with torch.no_grad():
-        policy, value, _ = model(encoded)
+        policy, value = model(encoded)
 
     result = (policy, value)
     if len(GLOBAL_CACHE) >= CACHE_SIZE_LIMIT:
@@ -351,5 +351,5 @@ def batch_model_call(model, boards_list):
     encoded_list = [encode_board(board) for board in boards_list]
     batch_tensor = torch.stack(encoded_list).to(DEVICE, dtype=torch.float32)
     with torch.no_grad():
-        policies, values, _ = model(batch_tensor)
+        policies, values = model(batch_tensor)
     return policies, values

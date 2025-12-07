@@ -18,12 +18,12 @@ COLOR_MAP = {chess.WHITE: 0, chess.BLACK: 6}
 
 def encode_board(board: chess.Board) -> torch.Tensor:
     """
-    Mã hóa bàn cờ thành tensor 20x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
+    Mã hóa bàn cờ thành tensor 24x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
 
     Returns:
         torch.Tensor: Tensor mã hóa bàn cờ.
     """
-    encoded = np.zeros((20, 8, 8), dtype=np.float32)
+    encoded = np.zeros((24, 8, 8), dtype=np.float32)
 
     # Mã hóa quân cờ
     for square in chess.SQUARES:
@@ -110,6 +110,69 @@ def encode_board(board: chess.Board) -> torch.Tensor:
     mobility = np.zeros((1, 8, 8), dtype=np.float32)
     mobility[0, :, :] = len(list(board.legal_moves)) / 40.0
     encoded[19, :, :] = mobility[0, :, :]
+    
+    # Kênh cho các quân đang bị tấn công
+    attacked_pieces = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and board.is_attacked_by(opponent_color, square):
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            # Tăng giá trị dựa trên giá trị quân cờ (quân quan trọng hơn có giá trị cao hơn)
+            piece_value = {chess.PAWN: 0.2, chess.KNIGHT: 0.5, chess.BISHOP: 0.5, 
+                          chess.ROOK: 0.8, chess.QUEEN: 1.0, chess.KING: 0.0}[piece.piece_type]
+            attacked_pieces[0, rank_idx, file_idx] = piece_value
+    encoded[20, :, :] = attacked_pieces[0, :, :]
+    
+    # Kênh cho các quân đang tấn công quân địch
+    attacking_pieces = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and board.is_attacked_by(self_color, square):
+            # Kiểm tra nếu quân này đang tấn công quân địch
+            attackers = []
+            for attack_square in chess.SQUARES:
+                attacked_piece = board.piece_at(attack_square)
+                if attacked_piece and attacked_piece.color != piece.color:
+                    # Kiểm tra nếu quân tại square đang tấn công attack_square
+                    if board.is_attacked_by(piece.color, attack_square) and \
+                       any(attacker == square for attacker in board.attackers(piece.color, attack_square)):
+                        attackers.append(attack_square)
+            
+            if attackers:
+                file_idx = chess.square_file(square)
+                rank_idx = chess.square_rank(square)
+                # Tăng giá trị dựa trên số quân đang bị tấn công
+                attacking_pieces[0, rank_idx, file_idx] = min(len(attackers) * 0.3, 1.0)
+    encoded[21, :, :] = attacking_pieces[0, :, :]
+    
+    # Kênh cho các quân đang bảo vệ quân khác của mình
+    protecting_pieces = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            # Tìm các quân cùng màu đang bảo vệ quân này
+            protectors = list(board.attackers(piece.color, square))
+            if protectors:
+                file_idx = chess.square_file(square)
+                rank_idx = chess.square_rank(square)
+                # Tăng giá trị dựa trên số lượng quân bảo vệ
+                protecting_pieces[0, rank_idx, file_idx] = min(len(protectors) * 0.3, 1.0)
+    encoded[22, :, :] = protecting_pieces[0, :, :]
+    
+    # Kênh cho các quân địch đang được bảo vệ
+    opponent_protected_pieces = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color != self_color:
+            # Tìm các quân địch đang bảo vệ quân này
+            protectors = list(board.attackers(piece.color, square))
+            if protectors:
+                file_idx = chess.square_file(square)
+                rank_idx = chess.square_rank(square)
+                # Tăng giá trị dựa trên số lượng quân bảo vệ
+                opponent_protected_pieces[0, rank_idx, file_idx] = min(len(protectors) * 0.3, 1.0)
+    encoded[23, :, :] = opponent_protected_pieces[0, :, :]
 
     return torch.from_numpy(encoded)
 

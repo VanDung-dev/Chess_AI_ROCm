@@ -2,7 +2,7 @@ import chess
 from modules.chess_mcts import cached_model_call
 from modules.chess_engine import move_to_index
 import torch
-import chess_mcts_rs
+import chess_rs
 
 
 def get_best_move(model, board, mcts_iterations=1000, temperature=0.9):
@@ -38,7 +38,7 @@ def get_best_move(model, board, mcts_iterations=1000, temperature=0.9):
             priors.append((move.uci(), move_prob))
         
         # Gọi triển khai Rust với model evaluation
-        results = chess_mcts_rs.mcts_loop(fen, mcts_iterations, priors, root_value)
+        results = chess_rs.mcts_loop(fen, mcts_iterations, priors, root_value)
         
         if not results:
             return None

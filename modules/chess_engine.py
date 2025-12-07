@@ -37,12 +37,12 @@ PROMOTION_VALUES = {
 
 def encode_board(board: chess.Board) -> torch.Tensor:
     """
-    Mã hóa bàn cờ thành tensor 30x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
+    Mã hóa bàn cờ thành tensor 32x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
 
     Returns:
         torch.Tensor: Tensor mã hóa bàn cờ.
     """
-    encoded = np.zeros((30, 8, 8), dtype=np.float32)
+    encoded = np.zeros((32, 8, 8), dtype=np.float32)
 
     # Mã hóa quân cờ
     for square in chess.SQUARES:
@@ -341,6 +341,43 @@ def encode_board(board: chess.Board) -> torch.Tensor:
                     protection_advantage = min((len(attackers) - len(defenders)) * 0.2, 1.0)
                     favorable_exchanges[0, rank_idx, file_idx] = protection_advantage
     encoded[29, :, :] = favorable_exchanges[0, :, :]
+    
+    # Kênh cho các nước đi chiếu vua đối phương
+    giving_check = np.zeros((1, 8, 8), dtype=np.float32)
+    # Tạo bản sao của bàn cờ để thử các nước đi
+    temp_board = board.copy()
+    for move in board.legal_moves:
+        # Thử nước đi
+        temp_board.set_board_fen(board.fen())  # Reset về trạng thái ban đầu
+        temp_board.push(move)
+        # Kiểm tra nếu nước đi này tạo ra chiếu
+        if temp_board.is_check():
+            # Đánh dấu ô đích của nước đi
+            to_square = move.to_square
+            file_idx = chess.square_file(to_square)
+            rank_idx = chess.square_rank(to_square)
+            giving_check[0, rank_idx, file_idx] = 1.0
+    encoded[30, :, :] = giving_check[0, :, :]
+    
+    # Kênh cho tình trạng vua đối phương
+    opponent_king_safety = np.zeros((1, 8, 8), dtype=np.float32)
+    opponent_king_square = board.king(not self_color)
+    if opponent_king_square:
+        # Kiểm tra xem vua đối phương có bị chiếu không
+        temp_board = board.copy()
+        if temp_board.is_check():
+            file_idx = chess.square_file(opponent_king_square)
+            rank_idx = chess.square_rank(opponent_king_square)
+            opponent_king_safety[0, rank_idx, file_idx] = 1.0  # Vua đối phương bị chiếu
+            
+        # Kiểm tra số lượng attacker đến vua đối phương
+        attackers = list(board.attackers(self_color, opponent_king_square))
+        if attackers:
+            file_idx = chess.square_file(opponent_king_square)
+            rank_idx = chess.square_rank(opponent_king_square)
+            # Giá trị dương càng lớn khi càng nhiều quân tấn công vua đối phương
+            opponent_king_safety[0, rank_idx, file_idx] = min(len(attackers) * 0.3, 1.0)
+    encoded[31, :, :] = opponent_king_safety[0, :, :]
 
     return torch.from_numpy(encoded)
 

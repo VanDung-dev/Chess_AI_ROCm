@@ -26,15 +26,23 @@ PIECE_VALUES = {
     chess.KING: 0.0,          # Vua không có giá trị vật chất
 }
 
+# Giá trị phong cấp (cũng chuẩn hóa)
+PROMOTION_VALUES = {
+    chess.QUEEN: 8.0/8.0,    # 8/8 = 1.0 - mạnh nhất
+    chess.KNIGHT: 3.0/8.0,   # 3/8 - có thể hữu ích trong một số tình huống
+    chess.ROOK: 5.0/8.0,     # 5/8
+    chess.BISHOP: 3.0/8.0,   # 3/8
+}
+
 
 def encode_board(board: chess.Board) -> torch.Tensor:
     """
-    Mã hóa bàn cờ thành tensor 27x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
+    Mã hóa bàn cờ thành tensor 30x8x8 cho mạng nơ-ron, bao gồm các kênh bổ sung.
 
     Returns:
         torch.Tensor: Tensor mã hóa bàn cờ.
     """
-    encoded = np.zeros((27, 8, 8), dtype=np.float32)
+    encoded = np.zeros((30, 8, 8), dtype=np.float32)
 
     # Mã hóa quân cờ
     for square in chess.SQUARES:
@@ -146,7 +154,7 @@ def encode_board(board: chess.Board) -> torch.Tensor:
                 if attacked_piece and attacked_piece.color != piece.color:
                     # Kiểm tra nếu quân tại square đang tấn công attack_square
                     if board.is_attacked_by(piece.color, attack_square) and \
-                       any(attacker == square for attacker in board.attackers(piece.color, attack_square)):
+                        any(attacker == square for attacker in board.attackers(piece.color, attack_square)):
                         attackers.append(attack_square)
             
             if attackers:
@@ -231,6 +239,108 @@ def encode_board(board: chess.Board) -> torch.Tensor:
             # Giá trị âm càng lớn (về phía -1) khi càng nhiều quân tấn công vua
             king_safety[0, rank_idx, file_idx] = -min(len(attackers) * 0.3, 1.0)
     encoded[26, :, :] = king_safety[0, :, :]
+    
+    # Kênh cho khả năng phong cấp của tốt
+    promotion_potential = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        # Chỉ xem xét các tốt của mình
+        if piece and piece.piece_type == chess.PAWN and piece.color == self_color:
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            
+            # Kiểm tra nếu tốt có thể phong cấp (ở hàng 7 cho trắng hoặc hàng 2 cho đen)
+            if (self_color == chess.WHITE and rank_idx == 6) or (self_color == chess.BLACK and rank_idx == 1):
+                # Kiểm tra nếu ô phong cấp an toàn (không bị tấn công nhiều)
+                promotion_square = chess.square(file_idx, 7 if self_color == chess.WHITE else 0)
+                attackers = len(list(board.attackers(opponent_color, promotion_square)))
+                defenders = len(list(board.attackers(self_color, promotion_square)))
+                
+                # Tính điểm phong cấp dựa trên quân hậu (mạnh nhất)
+                base_promotion_value = PROMOTION_VALUES[chess.QUEEN]
+                
+                # Điều chỉnh dựa trên tình trạng an toàn của ô phong cấp
+                safety_factor = 1.0
+                if attackers > defenders:
+                    safety_factor = max(0.1, 1.0 - (attackers - defenders) * 0.2)
+                    
+                promotion_potential[0, rank_idx, file_idx] = base_promotion_value * safety_factor
+                
+            # Nếu tốt gần hàng phong cấp, cho một giá trị nhỏ
+            elif (self_color == chess.WHITE and rank_idx >= 4) or (self_color == chess.BLACK and rank_idx <= 3):
+                distance_to_promotion = abs(rank_idx - (7 if self_color == chess.WHITE else 0))
+                potential_value = 0.5 * (1.0 - distance_to_promotion / 7.0)  # Tối đa 0.5
+                promotion_potential[0, rank_idx, file_idx] = potential_value
+    encoded[27, :, :] = promotion_potential[0, :, :]
+    
+    # Kênh cho quân địch có thể bị phong cấp
+    opponent_promotion_threat = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        # Chỉ xem xét các tốt của đối phương
+        if piece and piece.piece_type == chess.PAWN and piece.color != self_color:
+            file_idx = chess.square_file(square)
+            rank_idx = chess.square_rank(square)
+            
+            # Kiểm tra nếu tốt đối phương có thể phong cấp
+            if (self_color == chess.BLACK and rank_idx == 1) or (self_color == chess.WHITE and rank_idx == 6):
+                # Kiểm tra nếu ô phong cấp an toàn
+                promotion_square = chess.square(file_idx, 0 if self_color == chess.BLACK else 7)
+                attackers = len(list(board.attackers(self_color, promotion_square)))
+                defenders = len(list(board.attackers(not self_color, promotion_square)))
+                
+                # Tính điểm phong cấp dựa trên quân hậu (mạnh nhất)
+                base_threat_value = PROMOTION_VALUES[chess.QUEEN]
+                
+                # Điều chỉnh dựa trên tình trạng an toàn của ô phong cấp
+                safety_factor = 1.0
+                if defenders > attackers:
+                    safety_factor = max(0.1, 1.0 - (defenders - attackers) * 0.2)
+                    
+                opponent_promotion_threat[0, rank_idx, file_idx] = base_threat_value * safety_factor
+    encoded[28, :, :] = opponent_promotion_threat[0, :, :]
+    
+    # Kênh cho các trao đổi quân có lợi
+    favorable_exchanges = np.zeros((1, 8, 8), dtype=np.float32)
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == self_color:
+            # Kiểm tra nếu quân này đang tấn công một quân địch
+            attacked_squares = []
+            for attack_square in chess.SQUARES:
+                attacked_piece = board.piece_at(attack_square)
+                if attacked_piece and attacked_piece.color != piece.color:
+                    # Kiểm tra nếu quân tại square đang tấn công attack_square
+                    if board.is_attacked_by(piece.color, attack_square) and \
+                        any(attacker == square for attacker in board.attackers(piece.color, attack_square)):
+                        attacked_squares.append((attack_square, attacked_piece))
+            
+            # Nếu có quân địch bị tấn công, kiểm tra xem trao đổi có có lợi không
+            for attack_square, attacked_piece in attacked_squares:
+                # So sánh giá trị quân đang tấn công và quân bị tấn công
+                attacker_value = PIECE_VALUES[piece.piece_type]
+                defender_value = PIECE_VALUES[attacked_piece.piece_type]
+                
+                # Kiểm tra xem quân bị tấn công có được bảo vệ không
+                defenders = list(board.attackers(not self_color, attack_square))
+                # Kiểm tra xem quân tấn công có được bảo vệ không
+                attackers = list(board.attackers(self_color, square))
+                
+                # Nếu quân địch có giá trị cao hơn và ít hoặc không được bảo vệ
+                # hoặc nếu quân địch có giá trị tương đương nhưng được bảo vệ ít hơn
+                if defender_value > attacker_value and len(defenders) <= len(attackers):
+                    file_idx = chess.square_file(attack_square)
+                    rank_idx = chess.square_rank(attack_square)
+                    # Giá trị trao đổi có lợi dựa trên chênh lệch giá trị
+                    exchange_value = min((defender_value - attacker_value) * 2.0, 1.0)
+                    favorable_exchanges[0, rank_idx, file_idx] = exchange_value
+                elif defender_value >= attacker_value and len(defenders) < len(attackers):
+                    file_idx = chess.square_file(attack_square)
+                    rank_idx = chess.square_rank(attack_square)
+                    # Giá trị trao đổi có lợi dựa trên sự chênh lệch về số lượng bảo vệ
+                    protection_advantage = min((len(attackers) - len(defenders)) * 0.2, 1.0)
+                    favorable_exchanges[0, rank_idx, file_idx] = protection_advantage
+    encoded[29, :, :] = favorable_exchanges[0, :, :]
 
     return torch.from_numpy(encoded)
 

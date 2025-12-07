@@ -16,13 +16,13 @@ class ChessNet(nn.Module):
         stage_head (nn.Sequential): Đầu ra dự đoán stage (giai đoạn trận đấu).
         stage_adjust (nn.Sequential): Điều chỉnh đặc trưng theo thông tin stage.
     """
-    def __init__(self, input_channels=27, embedding_dim=64, num_residual_blocks=3, 
+    def __init__(self, input_channels=30, embedding_dim=64, num_residual_blocks=3, 
                  num_transformer_layers=3, num_heads=8, dropout_rate=0.1):
         """
         Khởi tạo mạng ChessNet.
         
         Args:
-            input_channels (int): Số lượng channels đầu vào (mặc định: 27).
+            input_channels (int): Số lượng channels đầu vào (mặc định: 30).
             embedding_dim (int): Kích thước embedding cho transformer (mặc định: 64).
             num_residual_blocks (int): Số lượng khối residual (mặc định: 3).
             num_transformer_layers (int): Số lượng lớp transformer (mặc định: 3).

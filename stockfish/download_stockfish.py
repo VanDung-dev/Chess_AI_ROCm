@@ -1,5 +1,7 @@
 import os
+import platform
 import requests
+import zipfile
 import tarfile
 import shutil
 from tqdm import tqdm
@@ -10,17 +12,30 @@ def download_stockfish():
     Chỉ giữ lại file binary, xóa toàn bộ file rác và file nén sau khi hoàn tất.
     """
 
-    # Tên file binary và file nén
-    binary_name = 'stockfish-ubuntu-x86-64-avx2'
-    archive_name = 'stockfish.tar'
-    model_url = 'https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar'
+    # Phát hiện nền tảng hiện tại
+    system = platform.system().lower()
+    
+    if system == "windows":
+        # For Windows
+        binary_name = 'stockfish-windows-x86-64-avx2.exe'
+        archive_name = 'stockfish.zip'
+        model_url = 'https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-windows-x86-64-avx2.zip'
+    else:
+        # Đối với hệ thống Linux/Unix
+        binary_name = 'stockfish-ubuntu-x86-64-avx2'
+        archive_name = 'stockfish.tar'
+        model_url = 'https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar'
 
     # Đường dẫn trong project
     script_dir = os.path.dirname(os.path.abspath(__file__))
     binary_path = os.path.join(script_dir, binary_name)
     archive_path = os.path.join(script_dir, archive_name)
     inner_folder = os.path.join(script_dir, 'stockfish')
-    extracted_binary = os.path.join(inner_folder, binary_name)
+    
+    if system == "windows":
+        extracted_binary = os.path.join(script_dir, 'stockfish', binary_name)
+    else:
+        extracted_binary = os.path.join(inner_folder, binary_name)
 
     # Kiểm tra nếu binary đã tồn tại
     if os.path.isfile(binary_path):
@@ -44,10 +59,16 @@ def download_stockfish():
 
             print('Tải xuống hoàn tất.')
 
-            # Giải nén file tar
-            print('Đang giải nén file TAR...')
-            with tarfile.open(archive_path) as tar_ref:
-                tar_ref.extractall(script_dir)
+            # Giải nén file
+            print(f'Đang giải nén file {archive_name}...')
+            if system == "windows":
+                # Giải nén file zip cho Windows
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    zip_ref.extractall(script_dir)
+            else:
+                # Giải nén file tar cho Linux
+                with tarfile.open(archive_path) as tar_ref:
+                    tar_ref.extractall(script_dir)
             print('Giải nén hoàn tất.')
 
             # Kiểm tra file stockfish có tồn tại không
@@ -73,4 +94,3 @@ def download_stockfish():
             print(f'Tải file thất bại. Mã lỗi HTTP: {response.status_code}')
     else:
         print(f'File nén đã tồn tại tại {archive_path}. Bỏ qua tải xuống.')
-

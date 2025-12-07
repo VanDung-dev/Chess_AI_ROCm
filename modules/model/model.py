@@ -1,7 +1,7 @@
 import os
 import torch
-from modules.model.chess_neuron import ChessNet
-from modules.config.chess_config import DEVICE
+from modules.model.neuron import ChessNet
+from modules.config.config import DEVICE
 
 def list_and_select_model(model_path):
     """

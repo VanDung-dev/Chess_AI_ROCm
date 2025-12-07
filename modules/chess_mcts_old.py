@@ -2,8 +2,8 @@ import torch
 import chess
 import numpy as np
 from collections import OrderedDict
-from modules.model.chess_engine import encode_board, move_to_index
-from modules.config.chess_config import DEVICE
+from modules.model.engine import encode_board, move_to_index
+from modules.config.config import DEVICE
 
 # Bảng Zobrist hashing
 ZOBRIST_TABLE = None

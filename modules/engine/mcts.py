@@ -1,6 +1,6 @@
 import chess
-from modules.chess_mcts import cached_model_call
-from modules.model.chess_engine import move_to_index
+from modules.chess_mcts_old import cached_model_call
+from modules.model.engine import move_to_index
 import torch
 import chess_rs
 

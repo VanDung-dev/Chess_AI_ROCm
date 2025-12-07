@@ -3,9 +3,9 @@ import time
 import torch
 import glob
 from modules.game.self_play import self_play_worker
-from modules.training.chess_train import train_on_data, ChessNet
-from modules.model.chess_model import load_model
-from modules.config.chess_config import MODEL_PATH, DATA_PATH
+from modules.training.trainner import train_on_data, ChessNet
+from modules.model.model import load_model
+from modules.config.config import MODEL_PATH, DATA_PATH
 
 
 def train_loop(

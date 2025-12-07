@@ -1,10 +1,10 @@
 import os
 import torch
-from modules.model.chess_neuron import ChessNet
-from modules.model.chess_model import list_and_select_model
-from modules.training.chess_train import run_train
-from modules.game.chess_play import run_play
-from modules.config.chess_config import DEVICE, MODEL_PATH
+from modules.model.neuron import ChessNet
+from modules.model.model import list_and_select_model
+from modules.training.trainner import run_train
+from modules.game.player import run_play
+from modules.config.config import DEVICE, MODEL_PATH
 from stockfish.download_stockfish import download_stockfish
 
 

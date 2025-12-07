@@ -2,7 +2,7 @@ import torch
 import chess
 import numpy as np
 from collections import OrderedDict
-from modules.model.engine import encode_board, move_to_index
+from modules.model.encoding import encode_board, move_to_index
 from modules.config.config import DEVICE
 
 # Bảng Zobrist hashing

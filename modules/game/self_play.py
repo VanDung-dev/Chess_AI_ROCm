@@ -3,7 +3,7 @@ import chess
 import os
 import time
 from tqdm import tqdm
-from modules.model.neuron import ChessNet
+from modules.model.model import ChessNet
 from modules.engine.mcts import run_mcts
 
 

@@ -3,9 +3,7 @@ import os
 import time
 import chess.pgn
 from modules.engine.mcts import get_best_move
-from modules.model.model import load_model
-from modules.config.config import DATA_PATH, DEVICE
-from modules.model.neuron import ChessNet
+from modules.model.model import load_model, ChessNet
 
 
 def detect_game_stage(board):

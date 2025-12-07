@@ -10,7 +10,7 @@ import chess.engine
 from tqdm import tqdm
 from typing import List, Tuple, Any
 from modules.model.neuron import ChessNet
-from modules.model.engine import encode_board, move_to_index, flip_vertical, flip_horizontal
+from modules.model.encoding import encode_board, move_to_index, flip_vertical, flip_horizontal
 from modules.model.model import load_model
 from modules.config.config import STOCKFISH_PATH, DATA_PATH, MODEL_PATH, DEVICE, LOGGER
 

@@ -47,7 +47,7 @@ def evaluate_position(engine: chess.engine.SimpleEngine, board: chess.Board) -> 
         float: Giá trị bàn cờ trong khoảng [-1, 1].
     """
     try:
-        info = engine.analyse(board, chess.engine.Limit(time=0.1))
+        info = engine.analyse(board, chess.engine.Limit(time=0.05))
         score = info["score"].relative.score(mate_score=10000) / 100.0
         return max(min(score / 10.0, 1.0), -1.0)
     except Exception as e:
@@ -106,7 +106,7 @@ def get_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, top_k: 
         List[chess.Move]: Danh sách các nước đi tốt nhất.
     """
     try:
-        info = engine.analyse(board, chess.engine.Limit(time=0.1), multipv=top_k)
+        info = engine.analyse(board, chess.engine.Limit(time=0.05), multipv=top_k)
         return [pv["pv"][0] for pv in info]
     except Exception as e:
         LOGGER.warning(f"Lỗi khi lấy top moves: {e}")

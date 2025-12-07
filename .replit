@@ -44,6 +44,10 @@ args = "maturin build"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
+args = "pip uninstall chess_ai_rocm"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
 args = "pip install target/wheels/*.whl"
 
 [[workflows.workflow]]

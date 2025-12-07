@@ -115,19 +115,24 @@ def get_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, top_k: 
 
 class ChessDataset:
     """
-    Dataset cho dữ liệu cờ vua từ các file PGN, hỗ trợ tăng cường dữ liệu và đánh giá Stockfish.
+    Dataset cho dữ liệu cờ vua từ các file PGN hoặc danh sách dữ liệu thô.
     """
-    def __init__(self, preprocess=False):
+    def __init__(self, preprocess=False, data=None):
         """
-        Khởi tạo dataset từ thư mục chứa file PG 애드.
+        Khởi tạo dataset.
 
         Args:
-            preprocess (bool): Nếu True, thực hiện tiền xử lý và tạo mới file preprocessed.pt.
+            preprocess (bool): Nếu True, thực hiện tiền xử lý từ PGN.
+            data (list): Danh sách dữ liệu thô (nếu có) để load trực tiếp.
         """
         self.games = []
         self.data = []
         self.stage_info = {"opening": 0, "middlegame": 0, "endgame": 0}
         self.preprocessed_path = os.path.join(DATA_PATH, "preprocessed.pt")
+
+        if data is not None:
+            self.data = data
+            return
 
         if not preprocess and os.path.exists(self.preprocessed_path):
             self.data = torch.load(self.preprocessed_path, weights_only=False)
@@ -244,8 +249,24 @@ class ChessDataset:
             Tuple[torch.Tensor, torch.Tensor, float, torch.Tensor]: Tensor bàn cờ, chỉ số nước đi,
             giá trị bàn cờ, và one-hot vector cho giai đoạn.
         """
-        tensor, move_idx, value, stage_onehot = self.data[idx]
-        return tensor, torch.tensor(move_idx, dtype=torch.long), torch.tensor(value, dtype=torch.float32), stage_onehot
+        # Định dạng dữ liệu: (fen/tensor, policy/move_idx, value, stage_onehot)
+        # Kiểm tra xem mục có phải là bộ 4 (định dạng pgn cũ) hay 3 (định dạng tự phát) hay không
+        item = self.data[idx]
+        
+        if len(item) == 4:
+            tensor, move_idx, value, stage_onehot = item
+            # move_idx là chỉ mục int
+            return tensor, torch.tensor(move_idx, dtype=torch.long), torch.tensor(value, dtype=torch.float32), stage_onehot
+        elif len(item) == 3:
+            fen, policy, value = item
+            if isinstance(fen, str):
+                board = chess.Board(fen)
+                tensor = encode_board(board)
+            else:
+                tensor = fen
+            return tensor, torch.tensor(policy, dtype=torch.float32), torch.tensor(value, dtype=torch.float32), torch.zeros(3) # dummy stage
+        else:
+             raise ValueError("Unknown data format")
 
 
 def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
@@ -286,9 +307,9 @@ def analyze_data(data_path: str = DATA_PATH) -> Tuple[dict, int]:
 
 
 def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
-               batch_size: int = 256, tolerance: float = 1e-4, patience: int = 3) -> None:
+               batch_size: int = 256, tolerance: float = 1e-4, patience: int = 3, dataset=None) -> None:
     """
-    Huấn luyện mô hình AI với dữ liệu PGN.
+    Huấn luyện mô hình AI.
 
     Args:
         ai_model (ChessNet): Mô hình AI cần huấn luyện.
@@ -296,6 +317,7 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         batch_size (int): Kích thước batch.
         tolerance (float): Ngưỡng dừng sớm.
         patience (int): Số epoch chờ trước khi dừng sớm.
+        dataset (ChessDataset): Dataset tùy chỉnh (nếu có).
     """
     try:
         LOGGER.info(f"Các backend có sẵn: {torch._dynamo.list_backends()}")
@@ -305,11 +327,13 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         LOGGER.warning(f"Không thể áp dụng torch.compile: {e}")
 
     ai_model.train()
-    dataset = ChessDataset()
+    if dataset is None:
+        dataset = ChessDataset()
+    
     if len(dataset) == 0:
         LOGGER.error("Lỗi: Không tìm thấy ván cờ hoặc nước đi hợp lệ trong dữ liệu.")
         return
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True) # num_workers=0 for safety in some envs
     LOGGER.info(f"DataLoader được tạo với batch_size={batch_size}, kích thước dataset={len(dataset)}")
 
     for param in ai_model.parameters():
@@ -330,14 +354,25 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
         total_loss, total_policy_loss, total_value_loss = 0, 0, 0
         for i, (batch_states, batch_policies, batch_values, batch_stages) in enumerate(data_loader):
             batch_states = batch_states.to(DEVICE, dtype=torch.float32)
-            batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
+            # batch_policies có thể là Long (index) hoặc Float (probs) tùy thuộc vào tập dữ liệu
+            if batch_policies.dtype == torch.float32:
+                 batch_policies = batch_policies.to(DEVICE, dtype=torch.float32)
+            else:
+                 batch_policies = batch_policies.to(DEVICE, dtype=torch.long)
+                 
             batch_values = batch_values.to(DEVICE, dtype=torch.float32)
             # batch_stages is ignored
             
             optimizer.zero_grad()
             try:
                 predicted_policies, predicted_values = ai_model(batch_states)
-                policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
+                
+                # Check target type for loss
+                if batch_policies.dim() > 1 and batch_policies.dtype == torch.float32:
+                     policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
+                else:
+                     policy_loss = torch.nn.functional.cross_entropy(predicted_policies, batch_policies)
+                     
                 value_loss = torch.nn.functional.mse_loss(predicted_values.squeeze(-1), batch_values)
                 
                 loss = policy_loss + value_loss
@@ -373,6 +408,21 @@ def train_with(ai_model: ChessNet, optimizer: optim.Optimizer,
 
     torch.save(ai_model.state_dict(), model_path)
     LOGGER.info(f"Đã lưu mô hình tại {model_path}")
+
+def train_on_data(ai_model, data_files, epochs=1):
+    """
+    Người trợ giúp đào tạo về danh sách tệp dữ liệu (self-play data).
+    """
+    all_data = []
+    for f in data_files:
+        if os.path.exists(f):
+            all_data.extend(torch.load(f))
+    
+    LOGGER.info(f"Training on {len(all_data)} samples from {len(data_files)} files.")
+    dataset = ChessDataset(data=all_data)
+    optimizer = optim.AdamW(ai_model.parameters(), lr=1e-4)
+    
+    train_with(ai_model, optimizer, patience=1)
 
 
 def run_train(selected_model_path=None):

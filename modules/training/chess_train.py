@@ -9,10 +9,10 @@ import chess.pgn
 import chess.engine
 from tqdm import tqdm
 from typing import List, Tuple, Any
-from modules.chess_neuron import ChessNet
-from modules.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
-from modules.chess_model import load_model
-from modules.chess_config import STOCKFISH_PATH, DATA_PATH, MODEL_PATH, DEVICE, LOGGER
+from modules.model.chess_neuron import ChessNet
+from modules.model.chess_engine import encode_board, move_to_index, flip_vertical, flip_horizontal
+from modules.model.chess_model import load_model
+from modules.config.chess_config import STOCKFISH_PATH, DATA_PATH, MODEL_PATH, DEVICE, LOGGER
 
 
 def get_game_result(pgn_game: chess.pgn.Game) -> float:

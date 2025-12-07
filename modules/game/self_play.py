@@ -3,8 +3,8 @@ import chess
 import os
 import time
 from tqdm import tqdm
-from modules.chess_neuron import ChessNet
-from modules.chess_mcts_rs import run_mcts
+from modules.model.chess_neuron import ChessNet
+from modules.engine.chess_mcts_rs import run_mcts
 
 
 def play_self_play_game(model, mcts_iterations=800, temperature=1.0):

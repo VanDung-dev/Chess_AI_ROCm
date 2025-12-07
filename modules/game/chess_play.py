@@ -2,10 +2,10 @@ import chess
 import os
 import time
 import chess.pgn
-from modules.chess_mcts_rs import get_best_move
-from modules.chess_model import load_model
-from modules.chess_config import DATA_PATH, DEVICE
-from modules.chess_neuron import ChessNet
+from modules.engine.chess_mcts_rs import get_best_move
+from modules.model.chess_model import load_model
+from modules.config.chess_config import DATA_PATH, DEVICE
+from modules.model.chess_neuron import ChessNet
 
 
 def detect_game_stage(board):

@@ -2,9 +2,46 @@ import chess
 import torch
 import chess_rs
 import numpy as np
-from modules.mcts_old import cached_model_call
-from modules.model.encoding import move_to_index
+from modules.config.config import DEVICE
+from modules.model.encoding import move_to_index, encode_board
 
+# Bộ nhớ đệm toàn cục đơn giản cho các lệnh gọi mô hình
+GLOBAL_CACHE = {} 
+CACHE_LIMIT = 10000
+
+def cached_model_call(model, board):
+    """
+    Gọi model có caching đơn giản bằng FEN.
+    """
+    fen = board.fen()
+    if fen in GLOBAL_CACHE:
+        return GLOBAL_CACHE[fen]
+
+    encoded = encode_board(board).unsqueeze(0).to(DEVICE, dtype=torch.float32)
+    with torch.no_grad():
+        policy, value = model(encoded)
+        
+    result = (policy.cpu(), value.cpu())
+    
+    # Làm sạch bộ nhớ cache nếu quá lớn
+    if len(GLOBAL_CACHE) > CACHE_LIMIT:
+        GLOBAL_CACHE.clear()
+    
+    GLOBAL_CACHE[fen] = result
+    return result
+
+def batch_model_call(model, boards_list):
+    """
+    Thực hiện suy luận hàng loạt.
+    """
+    if not boards_list:
+        return [], []
+
+    encoded_list = [encode_board(board) for board in boards_list]
+    batch_tensor = torch.stack(encoded_list).to(DEVICE, dtype=torch.float32)
+    with torch.no_grad():
+        policies, values = model(batch_tensor)
+    return policies.cpu(), values.cpu()
 
 class BoardEvaluator:
     def __init__(self, model):
@@ -32,6 +69,46 @@ class BoardEvaluator:
         except Exception as e:
             print(f"Lỗi trong BoardEvaluator: {e}")
             return ([], 0.0)
+
+    def evaluate_batch(self, fens):
+        """
+        Đánh giá hàng loạt các FEN.
+
+        Args:
+            fens (list of str): Danh sách chuỗi FEN.
+
+        Returns:
+            list of tuples: [(priors, value), ...]
+        """
+        try:
+            boards = [chess.Board(f) for f in fens]
+            if not boards:
+                return []
+            
+            policies, values = batch_model_call(self.model, boards)
+            # policies: (B, 4672), values: (B, 1) or (B)
+            
+            results = []
+            for i, board in enumerate(boards):
+                policy = policies[i]
+                value = values[i].item()
+                
+                # Softmax policy
+                policy_probs = torch.softmax(policy, dim=0) # dim=0 vì policy là 1D tensor tại đây
+                
+                legal_moves = list(board.legal_moves)
+                priors = []
+                for move in legal_moves:
+                    move_idx = move_to_index(move)
+                    move_prob = policy_probs[move_idx].item()
+                    priors.append((move.uci(), move_prob))
+                
+                results.append((priors, value))
+            
+            return results
+        except Exception as e:
+            print(f"Lỗi trong evaluate_batch: {e}")
+            return []
 
 
 def run_mcts(model, board, mcts_iterations=800, temperature=1.0):

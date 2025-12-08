@@ -1,6 +1,5 @@
+use chess::{Board, BoardStatus, ChessMove, MoveGen};
 use pyo3::prelude::*;
-use chess::{Board, ChessMove, MoveGen, BoardStatus};
-use rand::Rng;
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -28,6 +27,9 @@ impl MCTSNode {
         }
     }
 }
+
+const BATCH_SIZE: usize = 8;
+const VIRTUAL_LOSS: f32 = 1.0;
 
 #[pyfunction]
 pub fn mcts_loop(
@@ -64,10 +66,75 @@ pub fn mcts_loop(
             }
         }
     }
-    
-    // Chạy các lần lặp lại MCTS
-    for _ in 0..iterations {
-        mcts_iteration(root_idx, &mut nodes, evaluator)?;
+
+    // Chạy các lần lặp lại MCTS theo batch
+    let num_batches = (iterations + BATCH_SIZE - 1) / BATCH_SIZE;
+
+    for _ in 0..num_batches {
+        // Thu thập hàng loạt
+        let mut batch_paths = Vec::with_capacity(BATCH_SIZE);
+
+        // 1. Giai đoạn lựa chọn với Virtual Loss
+        for _ in 0..BATCH_SIZE {
+            let path = select_leaf_path(root_idx, &mut nodes);
+            apply_virtual_loss(&mut nodes, &path);
+            batch_paths.push(path);
+        }
+
+        // 2. Giai đoạn đánh giá
+        let mut fens_to_eval = Vec::new();
+        let mut paths_to_expand = Vec::new();
+
+        for path in &batch_paths {
+            let leaf_idx = *path.last().unwrap();
+            let leaf_node = &nodes[leaf_idx];
+
+            fens_to_eval.push(format!("{}", leaf_node.board));
+            paths_to_expand.push(leaf_idx);
+        }
+
+        if !fens_to_eval.is_empty() {
+            // Gọi Python evaluator.evaluate_batch
+            let result = evaluator.call_method1("evaluate_batch", (fens_to_eval,))?;
+            // Kết quả là List[(priors, value)]
+            let results_list: Vec<(Vec<(String, f32)>, f32)> = result.extract()?;
+
+            // 3. Giai đoạn mở rộng & Backprop
+            for (i, (priors, val)) in results_list.iter().enumerate() {
+                let leaf_idx = paths_to_expand[i];
+                let path = &batch_paths[i];
+
+                let value = *val;
+
+                let is_ongoing = nodes[leaf_idx].board.status() == BoardStatus::Ongoing;
+
+                if is_ongoing && nodes[leaf_idx].children.is_empty() {
+                    let moves: Vec<_> = MoveGen::new_legal(&nodes[leaf_idx].board).collect();
+                    for (move_str, prior) in priors {
+                        if let Ok(chess_move) = move_str.parse::<ChessMove>() {
+                            if moves.contains(&chess_move) {
+                                let mut new_board = nodes[leaf_idx].board;
+                                new_board = new_board.make_move_new(chess_move);
+
+                                let new_node_idx = nodes.len();
+                                let mut new_node =
+                                    MCTSNode::new(new_board, Some(leaf_idx), Some(chess_move));
+                                new_node.prior = *prior;
+                                nodes.push(new_node);
+
+                                nodes[leaf_idx].children.insert(chess_move, new_node_idx);
+                            }
+                        }
+                    }
+                }
+
+                backpropagate_batch(&mut nodes, path, value);
+            }
+        } else {
+            for path in batch_paths {
+                undo_virtual_loss(&mut nodes, &path);
+            }
+        }
     }
     
     // Trích xuất kết quả
@@ -89,95 +156,78 @@ pub fn mcts_loop(
     Ok(results)
 }
 
-fn mcts_iteration(
-    root_idx: usize,
-    nodes: &mut Vec<MCTSNode>,
-    evaluator: &Bound<'_, PyAny>,
-) -> PyResult<()> {
-    // Giai đoạn lựa chọn
+fn select_leaf_path(root_idx: usize, nodes: &mut Vec<MCTSNode>) -> Vec<usize> {
+    let mut path = Vec::new();
+    path.push(root_idx);
+
     let mut current_idx = root_idx;
-    while !nodes[current_idx].children.is_empty()
-        && nodes[current_idx].children.len()
-            == MoveGen::new_legal(&nodes[current_idx].board).count() {
-        let mut best_move = None;
+
+    loop {
+        if nodes[current_idx].children.is_empty() {
+            break;
+        }
+
+        let legal_count = MoveGen::new_legal(&nodes[current_idx].board).count();
+        if nodes[current_idx].children.len() != legal_count {
+            break;
+        }
+
+        let mut best_child_idx = None;
         let mut best_uct = f32::NEG_INFINITY;
-        
-        // Chọn child có giá trị UCT tốt nhất
+
         for (_, &child_idx) in &nodes[current_idx].children {
-            let uct = calculate_uct(current_idx, child_idx, &nodes);
+            let uct = calculate_uct(current_idx, child_idx, nodes);
             if uct > best_uct {
                 best_uct = uct;
-                best_move = Some(child_idx);
+                best_child_idx = Some(child_idx);
             }
         }
-        
-        if let Some(next_idx) = best_move {
+
+        if let Some(next_idx) = best_child_idx {
             current_idx = next_idx;
+            path.push(current_idx);
         } else {
             break;
         }
     }
 
-    // Giai đoạn mở rộng và đánh giá
-    let mut value = 0.0;
+    path
+}
 
-    if nodes[current_idx].board.status() == BoardStatus::Ongoing {
-        let moves: Vec<_> = MoveGen::new_legal(&nodes[current_idx].board).collect();
-        
-        // Tìm các động thái chưa được truy cập
-        // Gọi Python evaluator
-        let fen = format!("{}", nodes[current_idx].board);
-        let result = evaluator.call1((fen,))?;
-        let (priors, eval_value): (Vec<(String, f32)>, f32) = result.extract()?;
-        value = eval_value;
+fn apply_virtual_loss(nodes: &mut Vec<MCTSNode>, path: &[usize]) {
+    for &idx in path {
+        nodes[idx].visit_count += 1;
+        nodes[idx].total_value -= VIRTUAL_LOSS;
+    }
+}
 
-        // Nếu node này chưa có children (leaf), expand tất cả dựa trên priors từ model
-        if nodes[current_idx].children.is_empty() {
-            for (move_str, prior) in priors {
-                if let Ok(chess_move) = move_str.parse::<ChessMove>() {
-                    if moves.contains(&chess_move) {
-                        let mut new_board = nodes[current_idx].board;
-                        new_board = new_board.make_move_new(chess_move);
+fn undo_virtual_loss(nodes: &mut Vec<MCTSNode>, path: &[usize]) {
+    for &idx in path {
+        nodes[idx].visit_count -= 1;
+        nodes[idx].total_value += VIRTUAL_LOSS;
+    }
+}
 
-                        let new_node_idx = nodes.len();
-                        let mut new_node =
-                            MCTSNode::new(new_board, Some(current_idx), Some(chess_move));
-                        new_node.prior = prior;
-                        nodes.push(new_node);
+fn backpropagate_batch(nodes: &mut Vec<MCTSNode>, path: &[usize], real_value: f32) {
+    let root_turn = nodes[path[0]].board.side_to_move();
+    let leaf_turn = nodes[*path.last().unwrap()].board.side_to_move();
 
-                        nodes[current_idx].children.insert(chess_move, new_node_idx);
-                    }
-                }
-            }
-
-        } else {
-        }
+    let score_for_leaf_player = real_value;
+    let score_for_root = if leaf_turn == root_turn {
+        score_for_leaf_player
     } else {
-        let fen = format!("{}", nodes[current_idx].board);
-        if let Ok(result) = evaluator.call1((fen,)) {
-            if let Ok((_, eval_value)) = result.extract::<(Vec<(String, f32)>, f32)>() {
-                value = eval_value;
-            }
-        }
-    }
+        -score_for_leaf_player
+    };
 
-    // Giai đoạn lan truyền ngược
-    let mut node_idx = current_idx;
-    loop {
-        nodes[node_idx].visit_count += 1;
-        nodes[node_idx].total_value += value;
+    for &idx in path {
+        nodes[idx].total_value += VIRTUAL_LOSS;
 
-        // Flip value for next level up (parent perspective)
-        value = -value;
-
-        if let Some(parent_idx) = nodes[node_idx].parent {
-            node_idx = parent_idx;
+        if nodes[idx].board.side_to_move() == root_turn {
+            nodes[idx].total_value += score_for_root;
         } else {
-            break;
+            nodes[idx].total_value -= score_for_root;
         }
     }
-
-    Ok(())
 }
 
 fn calculate_uct(parent_idx: usize, child_idx: usize, nodes: &[MCTSNode]) -> f32 {
